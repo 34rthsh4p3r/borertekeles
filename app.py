@@ -1,3 +1,4 @@
+import html
 import os
 import sqlite3
 import hashlib
