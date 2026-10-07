@@ -244,43 +244,120 @@ def scale_question(wine, section, qkey, label, options):
         render_result_bars(wine, section, qkey, options=options, multi=False)
 
 
-def chart_for_question(wine, section, qkey, label, options=None, multi=False, top_n=None):
-    table, voters = result_table(wine, section, qkey, options=options, multi=multi)
+
+def top_single_result(wine, section, qkey, options=None):
+    table, voters = result_table(wine, section, qkey, options=options, multi=False)
     if table.empty or voters == 0:
+        return None
+    row = table.sort_values(["%", "Fő"], ascending=False).iloc[0]
+    return {
+        "label": str(row["Válasz"]),
+        "pct": float(row["%"]),
+        "count": int(row["Fő"]),
+    }
+
+
+def top_multi_results(wine, section, qkey, top_n=5):
+    table, voters = result_table(wine, section, qkey, multi=True)
+    if table.empty or voters == 0:
+        return []
+    # A részletes "Kategória → aroma" jelöléseket kihagyjuk a tömör összesítésből,
+    # és csak a fő aromacsoportokat mutatjuk.
+    table = table[~table["Válasz"].astype(str).str.contains("→", regex=False)]
+    if table.empty:
+        return []
+    table = table.sort_values(["%", "Fő"], ascending=False).head(top_n)
+    return [
+        {
+            "label": str(row["Válasz"]),
+            "pct": float(row["%"]),
+            "count": int(row["Fő"]),
+        }
+        for _, row in table.iterrows()
+    ]
+
+
+def fmt_pct(value):
+    if abs(value - round(value)) < 0.05:
+        return f"{int(round(value))}%"
+    return f"{value:.1f}%".replace(".", ",")
+
+
+def render_single_summary_line(wine, section, qkey, label, options=None):
+    result = top_single_result(wine, section, qkey, options=options)
+    if result is None:
+        st.markdown(f"**{label}** – még nincs szavazat")
         return
-    if top_n:
-        table = table.sort_values("%", ascending=False).head(top_n)
-    chart_data = table.set_index("Válasz")[["%"]]
-    st.markdown(f"**{label}** · {voters} fő")
-    st.bar_chart(chart_data, horizontal=True, height=max(180, 42 * len(chart_data)), x_label="%", y_label="")
-    compact = table.copy()
-    compact["Eredmény"] = compact.apply(lambda r: f"{r['%']:.1f}% · {int(r['Fő'])} fő", axis=1)
-    st.dataframe(compact[["Válasz", "Eredmény"]], hide_index=True, use_container_width=True)
+    st.markdown(
+        f"**{label}** – {result['label']} "
+        f"({fmt_pct(result['pct'])}, {result['count']} fő)"
+    )
+
+
+def render_multi_summary_line(wine, section, qkey, label, top_n=5):
+    results = top_multi_results(wine, section, qkey, top_n=top_n)
+    if not results:
+        st.markdown(f"**{label}:** még nincs szavazat")
+        return
+    items = ", ".join(
+        f"{r['label']} ({fmt_pct(r['pct'])}, {r['count']} fő)"
+        for r in results
+    )
+    st.markdown(f"**{label}:** {items}")
 
 
 def wine_summary(wine):
-    st.subheader(wine_name(wine))
+    st.header(wine_name(wine))
     wine_votes = fetch_votes(wine=wine)
     if wine_votes.empty:
         st.info("Ehhez a tételhez még nincs szavazat.")
         return
 
-    st.metric("Résztvevők", wine_votes["participant"].nunique())
-
     st.markdown("### Illat")
-    chart_for_question(wine, "illat", "intenzitas", "Illat intenzitása", ["Visszafogott", "Közepes", "Határozott"])
-    chart_for_question(wine, "illat", "elsodleges_aromak", "Illat – leggyakoribb elsődleges aromák", multi=True, top_n=10)
+    render_single_summary_line(
+        wine,
+        "illat",
+        "intenzitas",
+        "Illat intenzitása",
+        ["Visszafogott", "Közepes", "Határozott"],
+    )
+    render_multi_summary_line(
+        wine,
+        "illat",
+        "elsodleges_aromak",
+        "Illat – elsődleges aromák",
+        top_n=5,
+    )
 
     st.markdown("### Ízösszetétel")
     for qkey, label, options in SCALE_QUESTIONS["iz"]:
-        chart_for_question(wine, "iz", qkey, label, options=options)
-    chart_for_question(wine, "iz", "elsodleges_aromak", "Íz – leggyakoribb elsődleges aromák", multi=True, top_n=10)
+        render_single_summary_line(wine, "iz", qkey, label, options=options)
+
+    render_multi_summary_line(
+        wine,
+        "iz",
+        "elsodleges_aromak",
+        "Íz – elsődleges aromák",
+        top_n=5,
+    )
 
     st.markdown("### Másodlagos aromák")
-    chart_for_question(wine, "masodlagos", "aromak", "Leggyakoribb másodlagos aromák", multi=True, top_n=10)
+    render_multi_summary_line(
+        wine,
+        "masodlagos",
+        "aromak",
+        "Leggyakoribb aromák",
+        top_n=5,
+    )
 
     st.markdown("### Harmadlagos aromák")
-    chart_for_question(wine, "harmadlagos", "aromak", "Leggyakoribb harmadlagos aromák", multi=True, top_n=10)
+    render_multi_summary_line(
+        wine,
+        "harmadlagos",
+        "aromak",
+        "Leggyakoribb aromák",
+        top_n=5,
+    )
 
 
 @st.fragment(run_every="3s")
@@ -389,7 +466,6 @@ def main():
         multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
 
     with tab5:
-        st.subheader("A szavazatok összesítése")
         summary_wine = st.selectbox(
             "Válassz tételt",
             list(range(1, WINE_COUNT + 1)),
