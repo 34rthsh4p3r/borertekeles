@@ -9,9 +9,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-APP_TITLE = "A borok értékelése"
+APP_TITLE = "Magyar borvidékek geológiája és kultúrája"
 DB_PATH = Path(__file__).with_name("wine_votes.db")
-WINE_COUNT = 5
+LOGO_PATH = Path(__file__).with_name("GEOTerroir_HUN.jpg")
+DEFAULT_WINE_COUNT = 5
+MAX_WINE_COUNT = 50
 
 PRIMARY_AROMAS = {
     "Florális": ["akác", "kamilla", "bodza", "virág", "rózsa", "ibolya"],
@@ -113,6 +115,31 @@ def set_setting(key, value):
 
 def wine_name(wine):
     return get_setting(f"wine_{wine}_name", f"{wine}. tétel")
+
+
+def wine_count():
+    try:
+        value = int(get_setting("wine_count", str(DEFAULT_WINE_COUNT)))
+    except (TypeError, ValueError):
+        value = DEFAULT_WINE_COUNT
+    return max(1, min(value, MAX_WINE_COUNT))
+
+
+WINE_TYPES = {
+    "Fehér": (244, 241, 186),
+    "Rozé": (245, 124, 131),
+    "Vörös": (187, 34, 40),
+}
+
+
+def wine_type(wine):
+    value = get_setting(f"wine_{wine}_type", "Fehér")
+    return value if value in WINE_TYPES else "Fehér"
+
+
+def wine_color(wine):
+    r, g, b = WINE_TYPES[wine_type(wine)]
+    return f"rgb({r}, {g}, {b})"
 
 
 def participant_id():
@@ -345,25 +372,67 @@ def render_single_summary_chart(wine, section, qkey, label, options=None):
     else:
         table = table.sort_values("%", ascending=False)
 
-    max_pct = float(table["%"].max()) if not table.empty else 0.0
-
+    fill_color = wine_color(wine)
     rows = []
     for _, row in table.iterrows():
         option = html.escape(str(row["Válasz"]))
         pct = float(row["%"])
         count = int(row["Fő"])
         pct_text = fmt_pct(pct)
-        winner = abs(pct - max_pct) < 0.05
-        fill_class = "winner" if winner else "normal"
-        value_class = "winner-text" if winner else ""
         bar_width = pct if pct > 0 else 0
         rows.append(
             f'<div class="summary-row">'
             f'<div class="summary-option">{option}</div>'
             f'<div class="summary-track">'
-            f'<div class="summary-fill {fill_class}" style="width:{bar_width:.1f}%"></div>'
+            f'<div class="summary-fill" style="width:{bar_width:.1f}%;background:{fill_color}"></div>'
             f'</div>'
-            f'<div class="summary-value {value_class}">{pct_text} ({count} fő)</div>'
+            f'<div class="summary-value">{pct_text} ({count} fő)</div>'
+            f'</div>'
+        )
+
+    summary_html = (
+        f'<div class="summary-question">'
+        f'<div class="summary-question-title">{html.escape(label)}</div>'
+        f'{"".join(rows)}'
+        f'</div>'
+    )
+    st.markdown(summary_html, unsafe_allow_html=True)
+
+
+def render_multi_summary_chart(wine, section, qkey, label, primary_groups=False, top_n=10):
+    table, voters = result_table(wine, section, qkey, multi=True)
+
+    if table.empty or voters == 0:
+        st.markdown(f"### {label}")
+        st.caption("Még nincs szavazat.")
+        return
+
+    table = table.copy()
+    if primary_groups:
+        table = table[~table["Válasz"].astype(str).str.contains("→", regex=False)]
+
+    table = table[table["Fő"] > 0]
+    if table.empty:
+        st.markdown(f"### {label}")
+        st.caption("Még nincs szavazat.")
+        return
+
+    table = table.sort_values(["%", "Fő"], ascending=False).head(top_n)
+    fill_color = wine_color(wine)
+    rows = []
+    for _, row in table.iterrows():
+        label_text = str(row["Válasz"]).replace(" → ", " – ")
+        option = html.escape(label_text)
+        pct = float(row["%"])
+        count = int(row["Fő"])
+        pct_text = fmt_pct(pct)
+        rows.append(
+            f'<div class="summary-row aroma-row">'
+            f'<div class="summary-option">{option}</div>'
+            f'<div class="summary-track">'
+            f'<div class="summary-fill" style="width:{pct:.1f}%;background:{fill_color}"></div>'
+            f'</div>'
+            f'<div class="summary-value">{pct_text} ({count} fő)</div>'
             f'</div>'
         )
 
@@ -401,6 +470,7 @@ def render_multi_summary_line(wine, section, qkey, label, top_n=5):
 
 def wine_summary(wine):
     st.header(wine_name(wine))
+    st.caption(f"{wine_type(wine)}bor")
     wine_votes = fetch_votes(wine=wine)
     if wine_votes.empty:
         st.info("Ehhez a tételhez még nincs szavazat.")
@@ -414,42 +484,44 @@ def wine_summary(wine):
         "Illat intenzitása",
         ["Visszafogott", "Közepes", "Határozott"],
     )
-    render_multi_summary_line(
+    render_multi_summary_chart(
         wine,
         "illat",
         "elsodleges_aromak",
         "Illat – elsődleges aromák",
-        top_n=5,
+        primary_groups=True,
+        top_n=10,
     )
 
     st.markdown("## Ízösszetétel")
     for qkey, label, options in SCALE_QUESTIONS["iz"]:
         render_single_summary_chart(wine, "iz", qkey, label, options=options)
 
-    render_multi_summary_line(
+    render_multi_summary_chart(
         wine,
         "iz",
         "elsodleges_aromak",
         "Íz – elsődleges aromák",
-        top_n=5,
+        primary_groups=True,
+        top_n=10,
     )
 
     st.markdown("## Másodlagos aromák")
-    render_multi_summary_line(
+    render_multi_summary_chart(
         wine,
         "masodlagos",
         "aromak",
-        "Leggyakoribb aromák",
-        top_n=5,
+        "Másodlagos aromák",
+        top_n=10,
     )
 
     st.markdown("## Harmadlagos aromák")
-    render_multi_summary_line(
+    render_multi_summary_chart(
         wine,
         "harmadlagos",
         "aromak",
-        "Leggyakoribb aromák",
-        top_n=5,
+        "Harmadlagos aromák",
+        top_n=10,
     )
 
 
@@ -467,15 +539,49 @@ def admin_panel():
         return
     st.success("Admin mód aktív")
 
-    tasting_name = st.text_input("Kóstoló neve", value=get_setting("tasting_name", "Borok értékelése"))
-    st.markdown("### Tételek neve")
+    tasting_name = st.text_input(
+        "Kóstoló címe",
+        value=get_setting("tasting_name", APP_TITLE),
+    )
+
+    st.markdown("### Tételek száma")
+    current_count = wine_count()
+    new_count = st.number_input(
+        "Hány tétel legyen?",
+        min_value=1,
+        max_value=MAX_WINE_COUNT,
+        value=current_count,
+        step=1,
+    )
+    if st.button("Tételszám mentése", use_container_width=True):
+        set_setting("wine_count", int(new_count))
+        st.success(f"Tételek száma: {int(new_count)}")
+        st.rerun()
+
+    st.markdown("### Tételek")
     names = {}
-    for i in range(1, WINE_COUNT + 1):
-        names[i] = st.text_input(f"{i}. tétel", value=wine_name(i), key=f"admin_wine_{i}")
-    if st.button("Nevek mentése", use_container_width=True):
+    types = {}
+    for i in range(1, wine_count() + 1):
+        with st.expander(f"{i}. tétel – {wine_name(i)}", expanded=(i <= 3)):
+            names[i] = st.text_input(
+                "Tétel neve",
+                value=wine_name(i),
+                key=f"admin_wine_{i}",
+            )
+            type_options = list(WINE_TYPES.keys())
+            current_type = wine_type(i)
+            types[i] = st.selectbox(
+                "Bor típusa",
+                type_options,
+                index=type_options.index(current_type),
+                key=f"admin_wine_type_{i}",
+            )
+
+    if st.button("Tételek adatainak mentése", use_container_width=True):
         set_setting("tasting_name", tasting_name)
-        for i, name in names.items():
-            set_setting(f"wine_{i}_name", name.strip() or f"{i}. tétel")
+        for i in range(1, wine_count() + 1):
+            set_setting(f"wine_{i}_name", names[i].strip() or f"{i}. tétel")
+            set_setting(f"wine_{i}_type", types[i])
         st.success("Mentve.")
 
     st.markdown("### Összesített adatok")
@@ -483,23 +589,39 @@ def admin_panel():
     if df.empty:
         st.info("Még nincs szavazat.")
     else:
-        c1, c2 = st.columns(2)
-        c1.metric("Egyedi résztvevők", df["participant"].nunique())
-        c2.metric("Leadott jelölések", len(df))
         export = df.copy()
-        export.insert(2, "wine_name", export["wine"].map({i: wine_name(i) for i in range(1, WINE_COUNT + 1)}))
-        st.dataframe(export.sort_values("created_at", ascending=False), use_container_width=True, hide_index=True)
+        export.insert(
+            2,
+            "wine_name",
+            export["wine"].map({i: wine_name(i) for i in range(1, wine_count() + 1)}),
+        )
+        export.insert(
+            3,
+            "wine_type",
+            export["wine"].map({i: wine_type(i) for i in range(1, wine_count() + 1)}),
+        )
         csv = export.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("CSV letöltése", csv, file_name="wine_votes.csv", mime="text/csv")
+        st.download_button(
+            "CSV letöltése",
+            csv,
+            file_name="wine_votes.csv",
+            mime="text/csv",
+        )
 
     st.markdown("### Adatok törlése")
-    delete_wine = st.selectbox("Tétel", list(range(1, WINE_COUNT + 1)), format_func=wine_name, key="delete_wine")
+    delete_wine = st.selectbox(
+        "Tétel",
+        list(range(1, wine_count() + 1)),
+        format_func=wine_name,
+        key="delete_wine",
+    )
     c1, c2 = st.columns(2)
-    if c1.button("Kiválasztott tétel törlése", type="secondary", use_container_width=True):
+    if c1.button("Kiválasztott tétel szavazatainak törlése", type="secondary", use_container_width=True):
         with conn() as c:
             c.execute("DELETE FROM votes WHERE wine=?", (delete_wine,))
             c.commit()
         st.warning(f"{wine_name(delete_wine)} szavazatai törölve.")
+
     if c2.button("MINDEN SZAVAZAT TÖRLÉSE", type="secondary", use_container_width=True):
         with conn() as c:
             c.execute("DELETE FROM votes")
@@ -513,7 +635,13 @@ def main():
     st.markdown(
         """
         <style>
-        .block-container {max-width: 820px; padding-top: 1.3rem; padding-bottom: 5rem;}
+        .block-container {max-width: 900px; padding-top: 1.1rem; padding-bottom: 5rem;}
+        .main-title {
+            font-size: clamp(1.65rem, 5vw, 2.8rem);
+            line-height: 1.05;
+            margin: 0;
+            padding: 0;
+        }
         div[data-testid="stMetricValue"] {font-size: 2rem;}
         .stButton button {min-height: 3rem; font-weight: 700;}
 
@@ -537,7 +665,9 @@ def main():
             font-size: 0.88rem;
             font-weight: 700;
             line-height: 1.1;
-            text-transform: uppercase;
+        }
+        .aroma-row .summary-option {
+            font-size: 0.80rem;
         }
         .summary-track {
             width: 100%;
@@ -551,20 +681,11 @@ def main():
             height: 100%;
             box-sizing: border-box;
         }
-        .summary-fill.normal {
-            background: #b8b8b8;
-        }
-        .summary-fill.winner {
-            background: #00a63c;
-        }
         .summary-value {
             font-size: 0.86rem;
             font-weight: 700;
             white-space: nowrap;
             text-align: left;
-        }
-        .summary-value.winner-text {
-            color: #008c34;
         }
         @media (max-width: 640px) {
             .summary-row {
@@ -588,12 +709,18 @@ def main():
         admin_panel()
         return
 
-    tasting_name = get_setting("tasting_name", "A borok értékelése")
-    st.title(tasting_name)
+    tasting_name = get_setting("tasting_name", APP_TITLE)
+
+    header_logo, header_title = st.columns([1.25, 3.75], vertical_alignment="center")
+    with header_logo:
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), use_container_width=True)
+    with header_title:
+        st.markdown(f"<h1 class='main-title'>{html.escape(tasting_name)}</h1>", unsafe_allow_html=True)
 
     wine = st.selectbox(
         "Melyik tételt értékeled?",
-        list(range(1, WINE_COUNT + 1)),
+        list(range(1, wine_count() + 1)),
         format_func=wine_name,
         key="active_wine",
     )
