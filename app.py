@@ -389,10 +389,8 @@ def main():
         multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
 
     with tab5:
-        st.subheader("Közönség összesítése")
-        st.caption("Ez az oldal minden résztvevő telefonján látható, és kb. 3 másodpercenként frissül.")
+        st.subheader("A szavazatok összesítése")
         summary_wine = st.selectbox(
-            "Összesítés megtekintése",
             list(range(1, WINE_COUNT + 1)),
             index=wine - 1,
             format_func=wine_name,
