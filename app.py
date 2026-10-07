@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-APP_TITLE = "Borkóstoló – közönségszavazás"
+APP_TITLE = "A kurzus borainak értékelése"
 DB_PATH = Path(__file__).with_name("wine_votes.db")
 WINE_COUNT = 5
 
@@ -297,7 +297,7 @@ def admin_panel():
         return
     st.success("Admin mód aktív")
 
-    tasting_name = st.text_input("Kóstoló neve", value=get_setting("tasting_name", "Borkóstoló"))
+    tasting_name = st.text_input("Kóstoló neve", value=get_setting("tasting_name", "Borok értékelése"))
     st.markdown("### Tételek neve")
     names = {}
     for i in range(1, WINE_COUNT + 1):
