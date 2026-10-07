@@ -195,42 +195,77 @@ def render_result_bars(wine, section, question, options=None, multi=False):
         st.progress(min(float(row["%"])/100.0, 1.0))
 
 
+def save_primary_aromas(wine, section_key, category_key, detail_keys):
+    selected_categories = st.session_state.get(category_key, []) or []
+    detailed = []
+    for cat, key in detail_keys.items():
+        vals = st.session_state.get(key, []) or []
+        detailed.extend([f"{cat} → {v}" for v in vals])
+    replace_multi_votes(
+        wine,
+        section_key,
+        "elsodleges_aromak",
+        selected_categories + detailed,
+    )
+
+
 def primary_aroma_form(wine, section_key, title):
     st.subheader(title)
+
+    category_key = f"w{wine}_{section_key}_primary_categories"
+    detail_keys = {
+        cat: f"w{wine}_{section_key}_{cat}"
+        for cat in PRIMARY_AROMAS.keys()
+    }
+
     selected_categories = st.multiselect(
         "Mely elsődleges aromacsoportokat érzed?",
         list(PRIMARY_AROMAS.keys()),
-        key=f"w{wine}_{section_key}_primary_categories",
+        key=category_key,
+        on_change=save_primary_aromas,
+        args=(wine, section_key, category_key, detail_keys),
     )
-    detailed = []
+
     for cat in selected_categories:
         with st.expander(cat, expanded=True):
-            vals = st.multiselect(
+            st.multiselect(
                 "Konkrét aromák",
                 PRIMARY_AROMAS[cat],
-                key=f"w{wine}_{section_key}_{cat}",
+                key=detail_keys[cat],
+                on_change=save_primary_aromas,
+                args=(wine, section_key, category_key, detail_keys),
             )
-            detailed.extend([f"{cat} → {v}" for v in vals])
-    if st.button("Elsődleges aromák mentése", key=f"save_w{wine}_{section_key}_primary", use_container_width=True):
-        replace_multi_votes(wine, section_key, "elsodleges_aromak", selected_categories + detailed)
-        st.success("Szavazat elmentve.")
 
     with st.expander("Élő eredmények", expanded=False):
         render_result_bars(wine, section_key, "elsodleges_aromak", multi=True)
 
+def save_multi_aroma_votes(wine, section_key, data, widget_keys):
+    selected = []
+    for group in data.keys():
+        vals = st.session_state.get(widget_keys[group], []) or []
+        selected.extend([f"{group} → {v}" for v in vals])
+    replace_multi_votes(wine, section_key, "aromak", selected)
+
 
 def multi_aroma_block(wine, section_key, data, title):
     st.subheader(title)
-    selected = []
+
+    widget_keys = {
+        group: f"w{wine}_{section_key}_{group}"
+        for group in data.keys()
+    }
+
     for group, options in data.items():
-        vals = st.multiselect(group, options, key=f"w{wine}_{section_key}_{group}")
-        selected.extend([f"{group} → {v}" for v in vals])
-    if st.button("Aromák mentése", key=f"save_w{wine}_{section_key}", use_container_width=True):
-        replace_multi_votes(wine, section_key, "aromak", selected)
-        st.success("Szavazat elmentve.")
+        st.multiselect(
+            group,
+            options,
+            key=widget_keys[group],
+            on_change=save_multi_aroma_votes,
+            args=(wine, section_key, data, widget_keys),
+        )
+
     with st.expander("Élő eredmények", expanded=False):
         render_result_bars(wine, section_key, "aromak", multi=True)
-
 
 def save_scale_vote(wine, section, qkey, widget_key):
     choice = st.session_state.get(widget_key)
@@ -588,7 +623,7 @@ def main():
         live_summary_fragment(wine)
 
     st.divider()
-    st.caption("Geoterroir Kutatócsoport 2026")
+    st.caption("Geoterroir Kutatócsoport")
 
 
 if __name__ == "__main__":
