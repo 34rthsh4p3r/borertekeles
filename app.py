@@ -285,12 +285,12 @@ def fmt_pct(value):
 
 def render_single_summary_chart(wine, section, qkey, label, options=None):
     table, voters = result_table(wine, section, qkey, options=options, multi=False)
-    st.markdown(f"**{label}**")
+
     if table.empty or voters == 0:
+        st.markdown(f"### {label}")
         st.caption("Még nincs szavazat.")
         return
 
-    # Megtartjuk a kérdés természetes sorrendjét, ha meg van adva.
     if options:
         order_map = {opt: i for i, opt in enumerate(options)}
         table = table.copy()
@@ -299,19 +299,37 @@ def render_single_summary_chart(wine, section, qkey, label, options=None):
     else:
         table = table.sort_values("%", ascending=False)
 
-    chart_data = table.set_index("Válasz")[["%"]]
-    st.bar_chart(
-        chart_data,
-        horizontal=True,
-        height=max(150, 42 * len(chart_data)),
-        x_label="%",
-        y_label="",
-    )
+    max_pct = float(table["%"].max()) if not table.empty else 0.0
 
-    top = table.sort_values(["%", "Fő"], ascending=False).iloc[0]
-    st.caption(
-        f"Leggyakoribb: {top['Válasz']} "
-        f"({fmt_pct(float(top['%']))}, {int(top['Fő'])} fő)"
+    rows = []
+    for _, row in table.iterrows():
+        option = html.escape(str(row["Válasz"]))
+        pct = float(row["%"])
+        count = int(row["Fő"])
+        pct_text = fmt_pct(pct)
+        winner = abs(pct - max_pct) < 0.05
+        fill_class = "winner" if winner else "normal"
+        value_class = "winner-text" if winner else ""
+        rows.append(
+            f"""
+            <div class="summary-row">
+                <div class="summary-option">{option}</div>
+                <div class="summary-track">
+                    <div class="summary-fill {fill_class}" style="width:{max(1.5, pct):.1f}%"></div>
+                </div>
+                <div class="summary-value {value_class}">{pct_text} ({count} fő)</div>
+            </div>
+            """
+        )
+
+    st.markdown(
+        f"""
+        <div class="summary-question">
+            <div class="summary-question-title">{html.escape(label)}</div>
+            {''.join(rows)}
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -345,7 +363,7 @@ def wine_summary(wine):
         st.info("Ehhez a tételhez még nincs szavazat.")
         return
 
-    st.markdown("### Illat")
+    st.markdown("## Illat")
     render_single_summary_chart(
         wine,
         "illat",
@@ -361,7 +379,7 @@ def wine_summary(wine):
         top_n=5,
     )
 
-    st.markdown("### Ízösszetétel")
+    st.markdown("## Ízösszetétel")
     for qkey, label, options in SCALE_QUESTIONS["iz"]:
         render_single_summary_chart(wine, "iz", qkey, label, options=options)
 
@@ -373,7 +391,7 @@ def wine_summary(wine):
         top_n=5,
     )
 
-    st.markdown("### Másodlagos aromák")
+    st.markdown("## Másodlagos aromák")
     render_multi_summary_line(
         wine,
         "masodlagos",
@@ -382,7 +400,7 @@ def wine_summary(wine):
         top_n=5,
     )
 
-    st.markdown("### Harmadlagos aromák")
+    st.markdown("## Harmadlagos aromák")
     render_multi_summary_line(
         wine,
         "harmadlagos",
@@ -455,6 +473,68 @@ def main():
         .block-container {max-width: 820px; padding-top: 1.3rem; padding-bottom: 5rem;}
         div[data-testid="stMetricValue"] {font-size: 2rem;}
         .stButton button {min-height: 3rem; font-weight: 700;}
+
+        /* Tömör, referenciaábrához hasonló összesítő */
+        .summary-question {
+            margin: 0.4rem 0 1.2rem 0;
+        }
+        .summary-question-title {
+            font-size: 1.05rem;
+            font-weight: 800;
+            margin: 0 0 0.35rem 0;
+        }
+        .summary-row {
+            display: grid;
+            grid-template-columns: minmax(90px, 0.9fr) minmax(150px, 2.2fr) minmax(88px, auto);
+            align-items: center;
+            gap: 0.55rem;
+            margin: 0.28rem 0;
+        }
+        .summary-option {
+            font-size: 0.88rem;
+            font-weight: 700;
+            line-height: 1.1;
+            text-transform: uppercase;
+        }
+        .summary-track {
+            width: 100%;
+            height: 18px;
+            background: transparent;
+            border: 1px solid #111;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .summary-fill {
+            height: 100%;
+            box-sizing: border-box;
+        }
+        .summary-fill.normal {
+            background: #b8b8b8;
+        }
+        .summary-fill.winner {
+            background: #00a63c;
+        }
+        .summary-value {
+            font-size: 0.86rem;
+            font-weight: 700;
+            white-space: nowrap;
+            text-align: left;
+        }
+        .summary-value.winner-text {
+            color: #008c34;
+        }
+        @media (max-width: 640px) {
+            .summary-row {
+                grid-template-columns: 82px minmax(100px, 1fr) 82px;
+                gap: 0.35rem;
+            }
+            .summary-option, .summary-value {
+                font-size: 0.74rem;
+            }
+            .summary-track {
+                height: 16px;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
