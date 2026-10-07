@@ -1,7 +1,7 @@
-import html
 import os
 import sqlite3
 import hashlib
+import html
 import time
 from datetime import datetime
 from pathlib import Path
@@ -311,27 +311,24 @@ def render_single_summary_chart(wine, section, qkey, label, options=None):
         winner = abs(pct - max_pct) < 0.05
         fill_class = "winner" if winner else "normal"
         value_class = "winner-text" if winner else ""
+        bar_width = pct if pct > 0 else 0
         rows.append(
-            f"""
-            <div class="summary-row">
-                <div class="summary-option">{option}</div>
-                <div class="summary-track">
-                    <div class="summary-fill {fill_class}" style="width:{max(1.5, pct):.1f}%"></div>
-                </div>
-                <div class="summary-value {value_class}">{pct_text} ({count} fő)</div>
-            </div>
-            """
+            f'<div class="summary-row">'
+            f'<div class="summary-option">{option}</div>'
+            f'<div class="summary-track">'
+            f'<div class="summary-fill {fill_class}" style="width:{bar_width:.1f}%"></div>'
+            f'</div>'
+            f'<div class="summary-value {value_class}">{pct_text} ({count} fő)</div>'
+            f'</div>'
         )
 
-    st.markdown(
-        f"""
-        <div class="summary-question">
-            <div class="summary-question-title">{html.escape(label)}</div>
-            {''.join(rows)}
-        </div>
-        """,
-        unsafe_allow_html=True,
+    summary_html = (
+        f'<div class="summary-question">'
+        f'<div class="summary-question-title">{html.escape(label)}</div>'
+        f'{"".join(rows)}'
+        f'</div>'
     )
+    st.markdown(summary_html, unsafe_allow_html=True)
 
 
 def render_single_summary_line(wine, section, qkey, label, options=None):
