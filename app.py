@@ -466,14 +466,8 @@ def main():
         multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
 
     with tab5:
-        summary_wine = st.selectbox(
-            "Válassz tételt",
-            list(range(1, WINE_COUNT + 1)),
-            index=wine - 1,
-            format_func=wine_name,
-            key="summary_wine",
-        )
-        live_summary_fragment(summary_wine)
+        st.caption(f"Összesítés az aktív tételhez: {wine_name(wine)}")
+        live_summary_fragment(wine)
 
     st.divider()
     st.caption("Geoterroir Kutatócsoport")
