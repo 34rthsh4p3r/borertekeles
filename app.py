@@ -402,7 +402,7 @@ def main():
         live_summary_fragment(summary_wine)
 
     st.divider()
-    st.caption("Admin: add a URL végére ezt: ?admin=1")
+    st.caption("Geoterroir Kutatócsoport")
 
 
 if __name__ == "__main__":
