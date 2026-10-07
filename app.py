@@ -588,7 +588,7 @@ def main():
         live_summary_fragment(wine)
 
     st.divider()
-    st.caption("Geoterroir Kutatócsoport")
+    st.caption("Geoterroir Kutatócsoport 2026")
 
 
 if __name__ == "__main__":
