@@ -391,7 +391,7 @@ def main():
     with tab5:
         st.subheader("A szavazatok összesítése")
         summary_wine = st.selectbox(
-            "Válassz tételt"
+            "Válassz tételt",
             list(range(1, WINE_COUNT + 1)),
             index=wine - 1,
             format_func=wine_name,
