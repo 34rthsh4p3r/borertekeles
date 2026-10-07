@@ -283,6 +283,38 @@ def fmt_pct(value):
     return f"{value:.1f}%".replace(".", ",")
 
 
+def render_single_summary_chart(wine, section, qkey, label, options=None):
+    table, voters = result_table(wine, section, qkey, options=options, multi=False)
+    st.markdown(f"**{label}**")
+    if table.empty or voters == 0:
+        st.caption("Még nincs szavazat.")
+        return
+
+    # Megtartjuk a kérdés természetes sorrendjét, ha meg van adva.
+    if options:
+        order_map = {opt: i for i, opt in enumerate(options)}
+        table = table.copy()
+        table["_order"] = table["Válasz"].map(order_map).fillna(999)
+        table = table.sort_values("_order")
+    else:
+        table = table.sort_values("%", ascending=False)
+
+    chart_data = table.set_index("Válasz")[["%"]]
+    st.bar_chart(
+        chart_data,
+        horizontal=True,
+        height=max(150, 42 * len(chart_data)),
+        x_label="%",
+        y_label="",
+    )
+
+    top = table.sort_values(["%", "Fő"], ascending=False).iloc[0]
+    st.caption(
+        f"Leggyakoribb: {top['Válasz']} "
+        f"({fmt_pct(float(top['%']))}, {int(top['Fő'])} fő)"
+    )
+
+
 def render_single_summary_line(wine, section, qkey, label, options=None):
     result = top_single_result(wine, section, qkey, options=options)
     if result is None:
@@ -314,7 +346,7 @@ def wine_summary(wine):
         return
 
     st.markdown("### Illat")
-    render_single_summary_line(
+    render_single_summary_chart(
         wine,
         "illat",
         "intenzitas",
@@ -331,7 +363,7 @@ def wine_summary(wine):
 
     st.markdown("### Ízösszetétel")
     for qkey, label, options in SCALE_QUESTIONS["iz"]:
-        render_single_summary_line(wine, "iz", qkey, label, options=options)
+        render_single_summary_chart(wine, "iz", qkey, label, options=options)
 
     render_multi_summary_line(
         wine,
@@ -442,7 +474,6 @@ def main():
         format_func=wine_name,
         key="active_wine",
     )
-    st.info(f"Aktív tétel: **{wine_name(wine)}**")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Illat", "Ízösszetétel", "Másodlagos", "Harmadlagos", "Összesítés"
@@ -466,7 +497,6 @@ def main():
         multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
 
     with tab5:
-        st.caption(f"Összesítés az aktív tételhez: {wine_name(wine)}")
         live_summary_fragment(wine)
 
     st.divider()
