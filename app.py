@@ -232,15 +232,25 @@ def multi_aroma_block(wine, section_key, data, title):
         render_result_bars(wine, section_key, "aromak", multi=True)
 
 
+def save_scale_vote(wine, section, qkey, widget_key):
+    choice = st.session_state.get(widget_key)
+    if choice is not None:
+        replace_single_vote(wine, section, qkey, choice)
+
+
 def scale_question(wine, section, qkey, label, options):
     st.markdown(f"### {label}")
-    choice = st.radio(
-        "Válassz:", options, horizontal=True,
-        key=f"radio_w{wine}_{section}_{qkey}", label_visibility="collapsed"
+    widget_key = f"radio_w{wine}_{section}_{qkey}"
+    st.radio(
+        "Válassz:",
+        options,
+        index=None,
+        horizontal=True,
+        key=widget_key,
+        label_visibility="collapsed",
+        on_change=save_scale_vote,
+        args=(wine, section, qkey, widget_key),
     )
-    if st.button("Szavazok", key=f"vote_w{wine}_{section}_{qkey}", use_container_width=True):
-        replace_single_vote(wine, section, qkey, choice)
-        st.success("Szavazat elmentve.")
     with st.expander("Élő eredmények", expanded=False):
         render_result_bars(wine, section, qkey, options=options, multi=False)
 
