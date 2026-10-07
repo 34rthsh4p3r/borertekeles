@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-APP_TITLE = "A kurzus borainak értékelése"
+APP_TITLE = "A borok értékelése"
 DB_PATH = Path(__file__).with_name("wine_votes.db")
 WINE_COUNT = 5
 
@@ -356,9 +356,8 @@ def main():
         admin_panel()
         return
 
-    tasting_name = get_setting("tasting_name", "Borkóstoló")
+    tasting_name = get_setting("tasting_name", "A borok értékelése")
     st.title(tasting_name)
-    st.caption("Anonim, böngészős közönségszavazás · 5 bor")
 
     wine = st.selectbox(
         "Melyik tételt értékeled?",
