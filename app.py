@@ -10,7 +10,6 @@ import sqlite3
 import hashlib
 import html
 import inspect
-import inspect
 import time
 from datetime import datetime
 from pathlib import Path
@@ -255,28 +254,13 @@ def update_choice(state_key, option, multi):
 
 def choice_buttons(options, state_key, multi=False, columns=3, label_fn=None):
     """Fehér alapgombok; a kiválasztott gombok bordó primary típusúak."""
-    """Fehér alapgombok; a kijelölés világossárga primary típusú."""
     if state_key not in st.session_state:
         st.session_state[state_key] = [] if multi else None
     selected = st.session_state[state_key]
     columns = max(1, columns)
-    button_area = st.container(key=f"multi_{state_key}") if multi else st
     for start in range(0, len(options), columns):
         row_options = options[start:start + columns]
         cols = st.columns(columns, gap="small")
-        for offset, option in enumerate(row_options):
-            chosen = option in selected if multi else option == selected
-            cols[offset].button(
-                label_fn(option) if label_fn else str(option),
-                key=f"btn_{state_key}_{start + offset}",
-                type="primary" if chosen else "secondary",
-                on_click=update_choice,
-                args=(state_key, option, multi),
-                **full_width_kwargs(st.button),
-            )
-    for start in range(0, len(options), columns):
-        row_options = options[start:start + columns]
-        cols = button_area.columns(columns, gap="small")
         for offset, option in enumerate(row_options):
             chosen = option in selected if multi else option == selected
             cols[offset].button(
@@ -308,12 +292,10 @@ def primary_aroma_form(wine, section_key, title):
     }
     st.markdown("**Aromacsoportok**")
     if choice_buttons(list(PRIMARY_AROMAS), category_key, multi=True, columns=3):
-    if choice_buttons(list(PRIMARY_AROMAS), category_key, multi=True, columns=5):
         save_primary_aromas(wine, section_key, category_key, detail_keys)
     for cat, options in PRIMARY_AROMAS.items():
         st.markdown(f"**{cat}**")
         if choice_buttons(options, detail_keys[cat], multi=True, columns=3):
-        if choice_buttons(options, detail_keys[cat], multi=True, columns=5):
             save_primary_aromas(wine, section_key, category_key, detail_keys)
 
 
@@ -334,7 +316,6 @@ def multi_aroma_block(wine, section_key, data, title):
     for group, options in data.items():
         st.markdown(f"**{group}**")
         if choice_buttons(options, widget_keys[group], multi=True, columns=3):
-        if choice_buttons(options, widget_keys[group], multi=True, columns=5):
             save_multi_aroma_votes(wine, section_key, data, widget_keys)
 
 
@@ -560,7 +541,6 @@ def live_summary_fragment(selected_summary_wine):
 def admin_panel():
     st.title("Admin")
     admin_pw = os.getenv("ADMIN_PASSWORD")
-    admin_pw = os.getenv("ADMIN_PASSWORD") or "boradmin26"
     if not admin_pw:
         st.error("Az ADMIN_PASSWORD környezeti változó nincs beállítva; az admin felület nem érhető el.")
         return
@@ -678,9 +658,6 @@ def main():
             --wine-dark: #601a32;
             --wine-border: #e5cdd5;
             --wine-ink: #35252c;
-            --wine-ink: #35252c;
-            --selected: rgb(244, 241, 186);
-            --selected-border: #d5ce86;
         }
         [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
             background: #fcf9fa;
@@ -736,10 +713,6 @@ def main():
             border-color: var(--wine) !important;
             color: #ffffff !important;
             box-shadow: 0 5px 14px rgba(123, 35, 65, 0.22);
-            background: var(--selected) !important;
-            border-color: var(--selected-border) !important;
-            color: var(--wine-ink) !important;
-            box-shadow: 0 5px 14px rgba(131, 122, 50, 0.16);
         }
         .stButton button[kind="secondary"]:hover,
         [data-testid="stButton"] button[data-testid="stBaseButton-secondary"]:hover,
@@ -752,17 +725,6 @@ def main():
         [data-testid="stButton"] button[data-testid="stBaseButton-primary"]:hover {
             background: var(--wine-dark) !important;
             border-color: var(--wine-dark) !important;
-            background: var(--selected) !important;
-            border-color: #aaa158 !important;
-        }
-        [class*="st-key-multi_"] [data-testid="stButton"] button {
-            min-height: 2.5rem;
-            padding: 0.4rem 0.5rem;
-            border-radius: 12px;
-        }
-        [class*="st-key-multi_"] [data-testid="stButton"] button p {
-            font-size: 0.85rem;
-            line-height: 1.25;
         }
         .stButton button:focus-visible,
         [data-testid="stButton"] button:focus-visible,
