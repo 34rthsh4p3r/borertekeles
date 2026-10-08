@@ -3,6 +3,8 @@
 Indítás: python -m streamlit run bor_kostolo_design1.py
 Az eredeti wine_votes.db és az opcionális GEOTerroir_HUN.jpg maradjon
 a programmal azonos mappában. Admin: ?admin=1, ADMIN_PASSWORD változó.
+Az elsődleges aromák közös szekcióban szerepelnek. A régi illat/íz
+jelöléseket az összesítő és a CSV duplikációmentesen egyesíti.
 """
 
 import os
@@ -17,11 +19,16 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-APP_TITLE = "Magyar borvidékek geológiája és kultúrája"
+APP_TITLE = "Borok értékelése"
 DB_PATH = Path(__file__).with_name("wine_votes.db")
 LOGO_PATH = Path(__file__).with_name("GEOTerroir_HUN.jpg")
 DEFAULT_WINE_COUNT = 5
-MAX_WINE_COUNT = 50
+MAX_WINE_COUNT = 20
+
+# Közös elsődleges aromák; a régi illat/íz sorokat olvasáskor egyesítjük.
+PRIMARY_SECTION = "elsodleges"
+PRIMARY_QUESTION = "elsodleges_aromak"
+PRIMARY_SECTIONS = (PRIMARY_SECTION, "illat", "iz")
 
 PRIMARY_AROMAS = {
     "Florális": ["akác", "kamilla", "bodza", "virág", "rózsa", "ibolya"],
@@ -53,7 +60,7 @@ TERTIARY_AROMAS = {
 
 SCALE_QUESTIONS = {
     "illat": [
-        ("intenzitas", "Illat – intenzitás", ["Visszafogott", "Közepes", "Határozott"]),
+        ("intenzitas", "Illat intenzitása", ["Visszafogott", "Közepes", "Határozott"]),
     ],
     "iz": [
         ("edesseg", "Édesség", ["Száraz", "Félszáraz", "Félédes", "Édes"]),
@@ -174,11 +181,19 @@ def replace_single_vote(wine, section, question, option):
 def replace_multi_votes(wine, section, question, options):
     pid = participant_id()
     with conn() as c:
-        c.execute(
-            "DELETE FROM votes WHERE participant=? AND wine=? AND section=? AND question=?",
-            (pid, wine, section, question),
-        )
-        for option in options:
+        if section == PRIMARY_SECTION and question == PRIMARY_QUESTION:
+            # Az új választás a korábbi két szekció jelöléseit is felváltja.
+            c.execute(
+                "DELETE FROM votes WHERE participant=? AND wine=? "
+                "AND section IN (?, ?, ?) AND question=?",
+                (pid, wine, *PRIMARY_SECTIONS, question),
+            )
+        else:
+            c.execute(
+                "DELETE FROM votes WHERE participant=? AND wine=? AND section=? AND question=?",
+                (pid, wine, section, question),
+            )
+        for option in dict.fromkeys(options):
             c.execute(
                 "INSERT INTO votes(participant, wine, section, question, option, created_at) VALUES(?,?,?,?,?,?)",
                 (pid, wine, section, question, option, datetime.utcnow().isoformat()),
@@ -192,14 +207,26 @@ def fetch_votes(wine=None, section=None, question=None):
     if wine is not None:
         sql += " AND wine=?"
         params.append(int(wine))
-    if section:
+    if section == PRIMARY_SECTION:
+        sql += " AND (section=? OR (section IN (?, ?) AND question=?))"
+        params.extend([PRIMARY_SECTION, "illat", "iz", PRIMARY_QUESTION])
+    elif section:
         sql += " AND section=?"
         params.append(section)
     if question:
         sql += " AND question=?"
         params.append(question)
     with conn() as c:
-        return pd.read_sql_query(sql, c, params=params)
+        df = pd.read_sql_query(sql, c, params=params)
+    # A régi adatokat nem írjuk át. Az összesítésben és a CSV-ben a közös
+    # szekcióhoz tartoznak, ugyanazon résztvevő/bor/aroma csak egyszer szerepel.
+    primary = df["section"].isin(PRIMARY_SECTIONS) & df["question"].eq(PRIMARY_QUESTION)
+    df.loc[primary, "section"] = PRIMARY_SECTION
+    duplicates = primary & df.duplicated(
+        subset=["participant", "wine", "section", "question", "option"],
+        keep="first",
+    )
+    return df.loc[~duplicates].reset_index(drop=True)
 
 
 def result_table(wine, section, question, options=None, multi=False):
@@ -290,6 +317,22 @@ def primary_aroma_form(wine, section_key, title):
         cat: f"w{wine}_{section_key}_{cat}"
         for cat in PRIMARY_AROMAS
     }
+    # Az első megjelenítéskor a régi illat/íz jelölések egyesített halmazát
+    # töltjük be; később a session_state őrzi az aktuális kijelölést.
+    if category_key not in st.session_state or any(
+        key not in st.session_state for key in detail_keys.values()
+    ):
+        stored = set(
+            fetch_votes(wine, PRIMARY_SECTION, PRIMARY_QUESTION)
+            .loc[lambda df: df["participant"].eq(participant_id()), "option"]
+        )
+        if category_key not in st.session_state:
+            st.session_state[category_key] = [cat for cat in PRIMARY_AROMAS if cat in stored]
+        for cat, key in detail_keys.items():
+            if key not in st.session_state:
+                st.session_state[key] = [
+                    value for value in PRIMARY_AROMAS[cat] if f"{cat} → {value}" in stored
+                ]
     st.markdown("**Aromacsoportok**")
     if choice_buttons(list(PRIMARY_AROMAS), category_key, multi=True, columns=3):
         save_primary_aromas(wine, section_key, category_key, detail_keys)
@@ -484,7 +527,7 @@ def wine_summary(wine):
         st.info("Ehhez a tételhez még nincs szavazat.")
         return
 
-    st.markdown("## Illat")
+    st.markdown("## Illat intenzitása")
     render_single_summary_chart(
         wine,
         "illat",
@@ -492,24 +535,16 @@ def wine_summary(wine):
         "Illat intenzitása",
         ["Visszafogott", "Közepes", "Határozott"],
     )
-    render_multi_summary_chart(
-        wine,
-        "illat",
-        "elsodleges_aromak",
-        "Illat – elsődleges aromák",
-        primary_groups=True,
-        top_n=10,
-    )
-
     st.markdown("## Ízösszetétel")
     for qkey, label, options in SCALE_QUESTIONS["iz"]:
         render_single_summary_chart(wine, "iz", qkey, label, options=options)
 
+    st.markdown("## Elsődleges aromák")
     render_multi_summary_chart(
         wine,
-        "iz",
-        "elsodleges_aromak",
-        "Íz – elsődleges aromák",
+        PRIMARY_SECTION,
+        PRIMARY_QUESTION,
+        "Elsődleges aromák",
         primary_groups=True,
         top_n=10,
     )
@@ -840,17 +875,15 @@ def main():
 
     st.caption("Válaszd ki a tételt, majd jelöld a megfelelő jellemzőket. A válaszok automatikusan mentésre kerülnek.")
 
-    st.header("Illat")
-    scale_question(wine, "illat", "intenzitas", "Illat – intenzitás", ["Visszafogott", "Közepes", "Határozott"])
-    st.divider()
-    primary_aroma_form(wine, "illat", "Illat – elsődleges aromák")
+    st.header("Illat intenzitása")
+    scale_question(wine, "illat", "intenzitas", "Illat intenzitása", ["Visszafogott", "Közepes", "Határozott"])
 
     st.divider()
     st.header("Ízösszetétel")
     for qkey, label, options in SCALE_QUESTIONS["iz"]:
         scale_question(wine, "iz", qkey, label, options)
         st.divider()
-    primary_aroma_form(wine, "iz", "Íz – elsődleges aromák")
+    primary_aroma_form(wine, PRIMARY_SECTION, "Elsődleges aromák")
 
     st.divider()
     multi_aroma_block(wine, "masodlagos", SECONDARY_AROMAS, "Másodlagos aromák")
@@ -859,7 +892,7 @@ def main():
     multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
 
     st.divider()
-    st.caption("Geoterroir Kutatócsoport")
+    st.caption("Geoterroir Kutatócsoport 2026")
 
 
 if __name__ == "__main__":
