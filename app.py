@@ -222,51 +222,63 @@ def render_result_bars(wine, section, question, options=None, multi=False):
         st.progress(min(float(row["%"])/100.0, 1.0))
 
 
+def choice_buttons(options, state_key, multi=False, columns=3, label_fn=None):
+    """Show bordered, always-visible selectable buttons; return True when changed."""
+    if state_key not in st.session_state:
+        st.session_state[state_key] = [] if multi else None
+    selected = st.session_state[state_key]
+    for start in range(0, len(options), columns):
+        row_options = options[start:start + columns]
+        cols = st.columns(columns, gap="small")
+        for offset, option in enumerate(row_options):
+            chosen = option in selected if multi else option == selected
+            if cols[offset].button(
+                label_fn(option) if label_fn else str(option),
+                key=f"btn_{state_key}_{start + offset}",
+                type="primary" if chosen else "secondary",
+                use_container_width=True,
+            ):
+                if multi:
+                    updated = list(selected)
+                    if option in updated:
+                        updated.remove(option)
+                    else:
+                        updated.append(option)
+                    st.session_state[state_key] = updated
+                else:
+                    st.session_state[state_key] = option
+                return True
+    return False
+
+
 def save_primary_aromas(wine, section_key, category_key, detail_keys):
     selected_categories = st.session_state.get(category_key, []) or []
     detailed = []
     for cat, key in detail_keys.items():
         vals = st.session_state.get(key, []) or []
         detailed.extend([f"{cat} → {v}" for v in vals])
-    replace_multi_votes(
-        wine,
-        section_key,
-        "elsodleges_aromak",
-        selected_categories + detailed,
-    )
+    replace_multi_votes(wine, section_key, "elsodleges_aromak", selected_categories + detailed)
 
 
 def primary_aroma_form(wine, section_key, title):
     st.subheader(title)
-
     category_key = f"w{wine}_{section_key}_primary_categories"
     detail_keys = {
         cat: f"w{wine}_{section_key}_{cat}"
-        for cat in PRIMARY_AROMAS.keys()
+        for cat in PRIMARY_AROMAS
     }
-
-    selected_categories = st.multiselect(
-        "Mely elsődleges aromacsoportokat érzed?",
-        list(PRIMARY_AROMAS.keys()),
-        key=category_key,
-        on_change=save_primary_aromas,
-        args=(wine, section_key, category_key, detail_keys),
-    )
-
-    # Az összes aromacsoport egyszerre látható, lenyíló panelek nélkül.
-    for cat in PRIMARY_AROMAS:
-        st.multiselect(
-            f"{cat} – konkrét aromák",
-            PRIMARY_AROMAS[cat],
-            key=detail_keys[cat],
-            on_change=save_primary_aromas,
-            args=(wine, section_key, category_key, detail_keys),
-        )
+    st.markdown("**Aromacsoportok**")
+    if choice_buttons(list(PRIMARY_AROMAS), category_key, multi=True, columns=3):
+        save_primary_aromas(wine, section_key, category_key, detail_keys)
+    for cat, options in PRIMARY_AROMAS.items():
+        st.markdown(f"**{cat}**")
+        if choice_buttons(options, detail_keys[cat], multi=True, columns=3):
+            save_primary_aromas(wine, section_key, category_key, detail_keys)
 
 
 def save_multi_aroma_votes(wine, section_key, data, widget_keys):
     selected = []
-    for group in data.keys():
+    for group in data:
         vals = st.session_state.get(widget_keys[group], []) or []
         selected.extend([f"{group} → {v}" for v in vals])
     replace_multi_votes(wine, section_key, "aromak", selected)
@@ -274,41 +286,22 @@ def save_multi_aroma_votes(wine, section_key, data, widget_keys):
 
 def multi_aroma_block(wine, section_key, data, title):
     st.subheader(title)
-
     widget_keys = {
         group: f"w{wine}_{section_key}_{group}"
-        for group in data.keys()
+        for group in data
     }
-
     for group, options in data.items():
-        st.multiselect(
-            group,
-            options,
-            key=widget_keys[group],
-            on_change=save_multi_aroma_votes,
-            args=(wine, section_key, data, widget_keys),
-        )
-
-
-def save_scale_vote(wine, section, qkey, widget_key):
-    choice = st.session_state.get(widget_key)
-    if choice is not None:
-        replace_single_vote(wine, section, qkey, choice)
+        st.markdown(f"**{group}**")
+        if choice_buttons(options, widget_keys[group], multi=True, columns=3):
+            save_multi_aroma_votes(wine, section_key, data, widget_keys)
 
 
 def scale_question(wine, section, qkey, label, options):
     st.markdown(f"### {label}")
-    widget_key = f"radio_w{wine}_{section}_{qkey}"
-    st.radio(
-        "Válassz:",
-        options,
-        index=None,
-        horizontal=True,
-        key=widget_key,
-        label_visibility="collapsed",
-        on_change=save_scale_vote,
-        args=(wine, section, qkey, widget_key),
-    )
+    widget_key = f"choice_w{wine}_{section}_{qkey}"
+    if choice_buttons(options, widget_key, multi=False, columns=min(4, len(options))):
+        replace_single_vote(wine, section, qkey, st.session_state[widget_key])
+
 
 def top_single_result(wine, section, qkey, options=None):
     table, voters = result_table(wine, section, qkey, options=options, multi=False)
@@ -647,7 +640,18 @@ def main():
             padding: 0;
         }
         div[data-testid="stMetricValue"] {font-size: 2rem;}
-        .stButton button {min-height: 3rem; font-weight: 700;}
+        .stButton button {
+            min-height: 3rem;
+            font-weight: 700;
+            border: 2px solid currentColor;
+            border-radius: 0.55rem;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            height: auto;
+        }
+        .stButton button[kind="primary"] {
+            border-width: 2px;
+        }
 
         /* Tömör, referenciaábrához hasonló összesítő */
         .summary-question {
@@ -722,12 +726,19 @@ def main():
     with header_title:
         st.markdown(f"<h1 class='main-title'>{html.escape(tasting_name)}</h1>", unsafe_allow_html=True)
 
-    wine = st.selectbox(
-        "Melyik tételt értékeled?",
+    st.markdown("**Melyik tételt értékeled?**")
+    if "active_wine" not in st.session_state:
+        st.session_state.active_wine = 1
+    choice_buttons(
         list(range(1, wine_count() + 1)),
-        format_func=wine_name,
-        key="active_wine",
+        "active_wine",
+        columns=3,
+        label_fn=wine_name,
     )
+    wine = st.session_state.active_wine
+    if wine > wine_count():
+        wine = 1
+        st.session_state.active_wine = wine
 
     st.caption("Válaszd ki a tételt, majd jelöld a megfelelő jellemzőket. A válaszok automatikusan mentésre kerülnek.")
 
