@@ -558,12 +558,12 @@ def admin_panel():
             )
             type_options = list(WINE_TYPES.keys())
             current_type = wine_type(i)
-            types[i] = st.selectbox(
-                "Bor típusa",
-                type_options,
-                index=type_options.index(current_type),
-                key=f"admin_wine_type_{i}",
-            )
+            st.markdown("**Bor típusa**")
+            type_key = f"admin_wine_type_{i}"
+            if type_key not in st.session_state:
+                st.session_state[type_key] = current_type
+            choice_buttons(type_options, type_key, columns=3)
+            types[i] = st.session_state[type_key]
 
     if st.button("Tételek adatainak mentése", use_container_width=True):
         set_setting("tasting_name", tasting_name)
@@ -597,21 +597,19 @@ def admin_panel():
         )
 
     st.markdown("### Eredmények tételek szerint")
-    summary_wine = st.selectbox(
-        "Összesítés megtekintése – tétel",
-        list(range(1, wine_count() + 1)),
-        format_func=wine_name,
-        key="admin_summary_wine",
-    )
+    st.markdown("**Összesítés megtekintése – tétel**")
+    if "admin_summary_wine" not in st.session_state:
+        st.session_state.admin_summary_wine = 1
+    choice_buttons(list(range(1, wine_count() + 1)), "admin_summary_wine", columns=3, label_fn=wine_name)
+    summary_wine = st.session_state.admin_summary_wine
     live_summary_fragment(summary_wine)
 
     st.markdown("### Adatok törlése")
-    delete_wine = st.selectbox(
-        "Tétel",
-        list(range(1, wine_count() + 1)),
-        format_func=wine_name,
-        key="delete_wine",
-    )
+    st.markdown("**Törlendő tétel**")
+    if "delete_wine" not in st.session_state:
+        st.session_state.delete_wine = 1
+    choice_buttons(list(range(1, wine_count() + 1)), "delete_wine", columns=3, label_fn=wine_name)
+    delete_wine = st.session_state.delete_wine
     c1, c2 = st.columns(2)
     if c1.button("Kiválasztott tétel szavazatainak törlése", type="secondary", use_container_width=True):
         with conn() as c:
@@ -650,6 +648,10 @@ def main():
             height: auto;
         }
         .stButton button[kind="primary"] {
+            border-width: 3px;
+            box-shadow: inset 0 0 0 1px currentColor;
+        }
+        .stButton button[kind="secondary"] {
             border-width: 2px;
         }
 
