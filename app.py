@@ -1,30 +1,80 @@
-"""GeoTerroir közönségszavazás. Indítás: streamlit run app.py"""
-from __future__ import annotations
+# -*- coding: utf-8 -*-
+"""
+Magyar borvidékek geológiája és kultúrája – borkóstoló közönségszavazás.
 
+Futtatás:
+    pip install -r requirements.txt
+    streamlit run app.py
+
+Admin felület: ?admin=1 (jelszó: ADMIN_PASSWORD környezeti változó / secret,
+fejlesztési tartalék: boradmin26)
+"""
+
+import base64
 import hashlib
 import hmac
 import html
-import io
 import os
+import re
 import sqlite3
-from contextlib import contextmanager
+import time
+import unicodedata
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 import streamlit as st
 
+# ---------------------------------------------------------------------------
+# Konstansok
+# ---------------------------------------------------------------------------
+
+APP_TITLE = "Magyar borvidékek geológiája és kultúrája"
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("VOTES_DB_PATH", str(BASE_DIR / "votes.sqlite3")))
-DEFAULT_TITLE = "Magyar borvidékek geológiája és kultúrája"
-WINE_TYPES = ("Fehér", "Rozé", "Vörös")
+LOGO_PATH = BASE_DIR / "GEOTerroir_HUN.jpg"
+DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "borkostolo.db"))
+DEFAULT_ADMIN_PASSWORD = "boradmin26"
+
+MIN_WINES, MAX_WINES, DEFAULT_WINES = 1, 50, 5
+DEFAULT_WINE_NAME = "Bortétel"
+
+WINE_TYPES = ["Fehér", "Rozé", "Vörös"]
+WINE_TYPE_LABELS = {"Fehér": "Fehérbor", "Rozé": "Rozébor", "Vörös": "Vörösbor"}
 WINE_COLORS = {
     "Fehér": "rgb(244, 241, 186)",
     "Rozé": "rgb(245, 124, 131)",
     "Vörös": "rgb(187, 34, 40)",
 }
-PRIMARY = {
+NEUTRAL_COLOR = "rgb(184, 184, 184)"
+ARROW = " → "
+
+# Illat
+SMELL_SECTION = "illat"
+SMELL_SCALES = [
+    ("intenzitas", "Illat intenzitása", ["Visszafogott", "Közepes", "Határozott"]),
+]
+
+# Ízösszetétel
+TASTE_SCALE_SECTION = "izosszetetel"
+TASTE_SCALES = [
+    ("edesseg", "Édesség", ["Száraz", "Félszáraz", "Félédes", "Édes"]),
+    ("savassag", "Savasság", ["Alacsony", "Közepes", "Magas"]),
+    ("tannin", "Tannin", ["Alacsony", "Közepes", "Magas"]),
+    ("alkohol", "Alkohol", ["Alacsony", "Közepes", "Magas"]),
+    ("testesseg", "Testesség", ["Könnyű", "Közepes", "Telt"]),
+    ("intenzitas", "Intenzitás", ["Könnyű", "Közepes", "Határozott"]),
+    ("lecsengese", "Lecsengés", ["Rövid", "Közepes", "Hosszú"]),
+]
+TANNIN_KEY = "tannin"
+
+TASTE_AROMA_SECTION = "iz"
+PRIMARY_QUESTION = "elsodleges_aromak"
+SECONDARY_SECTION = "masodlagos"
+TERTIARY_SECTION = "harmadlagos"
+GROUP_QUESTION = "aromak"
+
+PRIMARY_AROMAS = {
     "Florális": ["akác", "kamilla", "bodza", "virág", "rózsa", "ibolya"],
     "Éretlen gyümölcs": ["zöldalma", "egres", "körte", "szőlő"],
     "Citrusféle": ["grapefruit", "citrom", "lime", "narancs"],
@@ -36,534 +86,658 @@ PRIMARY = {
     "Füves": ["zöldpaprika", "fű", "paradicsomlevél", "spárga"],
     "Gyógynövényes": ["eukaliptusz", "menta", "édeskömény", "kapor"],
 }
-SECONDARY = {
+
+SECONDARY_AROMAS = {
     "Élesztő": ["keksz", "kenyér", "pirítós", "kenyértészta", "sajt", "joghurt"],
     "Malolaktikus erjedés": ["vaj", "tejszín", "sajt", "joghurt"],
-    "Tölgyfahordós jegyek": ["vanília", "szegfűszeg", "szerecsendió", "kókusz", "karamella",
-                            "pirítós", "égett fa", "füst", "csokoládé", "kávé", "gyanta", "cédrus"],
+    "Tölgyfahordós jegyek": [
+        "vanília", "szegfűszeg", "szerecsendió", "kókusz", "karamella", "pirítós",
+        "égett fa", "füst", "csokoládé", "kávé", "gyanta", "cédrus",
+    ],
 }
-TERTIARY = {
+
+TERTIARY_AROMAS = {
     "Oxidáció": ["mandula", "mogyoró", "dió", "csokoládé", "kávé", "karamell"],
-    "Vörösbor": ["szárított gyümölcs", "bőr", "föld", "gomba", "erdei talaj", "hús",
-                "dohány", "nedves levél", "karamell"],
-    "Fehérbor": ["szárított gyümölcs", "narancslekvár", "petrol (benzin)", "fahéj",
-                "gyömbér", "szerecsendió", "mogyoró", "méz", "karamell"],
-}
-SCENT_SCALES = {"intenzitas": ("Illat intenzitása", ["Visszafogott", "Közepes", "Határozott"])}
-TASTE_SCALES = {
-    "edesseg": ("Édesség", ["Száraz", "Félszáraz", "Félédes", "Édes"]),
-    "savassag": ("Savasság", ["Alacsony", "Közepes", "Magas"]),
-    "tannin": ("Tannin", ["Alacsony", "Közepes", "Magas"]),
-    "alkohol": ("Alkohol", ["Alacsony", "Közepes", "Magas"]),
-    "testesseg": ("Testesség", ["Könnyű", "Közepes", "Telt"]),
-    "intenzitas": ("Intenzitás", ["Könnyű", "Közepes", "Határozott"]),
-    "lecsenges": ("Lecsengés", ["Rövid", "Közepes", "Hosszú"]),
+    "Vörösbor": [
+        "szárított gyümölcs", "bőr", "föld", "gomba", "erdei talaj", "hús",
+        "dohány", "nedves levél", "karamell",
+    ],
+    "Fehérbor": [
+        "szárított gyümölcs", "narancslekvár", "petrol (benzin)", "fahéj",
+        "gyömbér", "szerecsendió", "mogyoró", "méz", "karamell",
+    ],
 }
 
+GROUPS_BY_SECTION = {
+    SECONDARY_SECTION: SECONDARY_AROMAS,
+    TERTIARY_SECTION: TERTIARY_AROMAS,
+}
 
-@contextmanager
-def conn():
-    """Minden művelet saját kapcsolatot használ; commit/rollback és lezárás garantált."""
-    connection = sqlite3.connect(DB_PATH, timeout=15)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA busy_timeout=15000")
-    try:
-        with connection:
-            yield connection
-    finally:
-        connection.close()
-
-
-def init_db():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with conn() as database:
-        database.execute("PRAGMA journal_mode=WAL")
-        database.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        database.execute("""CREATE TABLE IF NOT EXISTS votes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            participant TEXT NOT NULL, wine INTEGER NOT NULL CHECK(wine BETWEEN 1 AND 50),
-            section TEXT NOT NULL, question TEXT NOT NULL, option TEXT NOT NULL,
-            created_at TEXT NOT NULL)""")
-        database.execute("CREATE UNIQUE INDEX IF NOT EXISTS vote_unique ON votes(participant,wine,section,question,option)")
-        database.execute("CREATE INDEX IF NOT EXISTS vote_question ON votes(wine,section,question)")
-        defaults = {"title": DEFAULT_TITLE, "wine_count": "5", "revision": "0", "public_url": ""}
-        for wine in range(1, 51):
-            defaults[f"wine_{wine}_name"] = f"{wine}. tétel"
-            defaults[f"wine_{wine}_type"] = "Fehér"
-        database.executemany("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", defaults.items())
-
-
-def all_settings():
-    with conn() as database:
-        return dict(database.execute("SELECT key,value FROM settings").fetchall())
+CSS = "".join([
+    ".block-container{max-width:880px;padding-top:1.2rem;padding-left:1rem;padding-right:1rem}",
+    ".apphead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:.4rem}",
+    ".apptitle{flex:1 1 260px;font-size:1.7rem;line-height:1.2;font-weight:700;margin:0}",
+    ".applogo{height:auto;max-height:72px;max-width:100%;object-fit:contain}",
+    ".tastingtitle{opacity:.75;margin-bottom:.5rem}",
+    'div[data-testid="stRadio"] label{min-height:44px;align-items:center}',
+    ".stButton>button,.stDownloadButton>button{min-height:44px}",
+    ".wtitle{font-size:2rem;font-weight:800;line-height:1.15;margin-top:.3rem}",
+    ".wsub{font-size:.95rem;opacity:.7;margin-bottom:.6rem}",
+    ".qtitle{font-weight:700;margin:14px 0 4px}",
+    ".vempty{opacity:.6;font-size:.9rem;margin:4px 0}",
+    ".vrow{display:grid;grid-template-columns:90px 1fr auto;gap:8px;align-items:center;margin:5px 0}",
+    ".vrow.wide{grid-template-columns:150px 1fr auto}",
+    ".vlabel{font-size:.85rem;font-weight:600;text-transform:uppercase;overflow-wrap:anywhere}",
+    ".vtrack{background:rgba(128,128,128,.14);border-radius:4px;height:20px}",
+    ".vbar{height:100%;box-sizing:border-box;border-radius:4px}",
+    ".vval{font-size:.85rem;white-space:nowrap;text-align:right}",
+    "@media (max-width:600px){",
+    ".apptitle{font-size:1.35rem}",
+    ".applogo{max-height:56px}",
+    ".wtitle{font-size:1.6rem}",
+    ".vrow{grid-template-columns:82px minmax(100px,1fr) 82px;gap:6px}",
+    ".vrow.wide{grid-template-columns:110px minmax(80px,1fr) 64px}",
+    ".vlabel{font-size:.72rem}",
+    ".vval{font-size:.75rem;white-space:normal;line-height:1.1}",
+    "}",
+])
 
 
-def get_setting(key, default=""):
-    with conn() as database:
-        row = database.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+# ---------------------------------------------------------------------------
+# Adatbázis és beállítások
+# ---------------------------------------------------------------------------
+
+def conn() -> sqlite3.Connection:
+    """Új SQLite kapcsolat WAL móddal."""
+    connection = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    connection.execute("PRAGMA journal_mode=WAL;")
+    connection.execute("PRAGMA busy_timeout=30000;")
+    return connection
+
+
+@st.cache_resource
+def init_db() -> bool:
+    """Táblák és indexek létrehozása (folyamatonként egyszer)."""
+    with closing(conn()) as connection, connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS votes ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "participant TEXT NOT NULL,"
+            "wine INTEGER NOT NULL,"
+            "section TEXT NOT NULL,"
+            "question TEXT NOT NULL,"
+            "option TEXT NOT NULL,"
+            "created_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_votes_unique "
+            "ON votes(participant, wine, section, question, option)"
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS ix_votes_wine ON votes(wine)")
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"
+        )
+    return True
+
+
+def get_setting(key: str, default=None):
+    with closing(conn()) as connection:
+        row = connection.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
     return row[0] if row else default
 
 
-def set_setting(key, value):
-    with conn() as database:
-        database.execute("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+def set_setting(key: str, value) -> None:
+    set_many_settings({key: value})
 
 
-def wine_count(settings=None):
-    return int((settings or all_settings()).get("wine_count", "5"))
+def set_many_settings(values: dict) -> None:
+    with closing(conn()) as connection, connection:
+        connection.executemany(
+            "INSERT INTO settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [(k, str(v)) for k, v in values.items()],
+        )
 
 
-def wine_name(wine, settings=None):
-    return (settings or all_settings()).get(f"wine_{wine}_name", f"{wine}. tétel")
+def wine_count() -> int:
+    try:
+        count = int(get_setting("wine_count", DEFAULT_WINES))
+    except (TypeError, ValueError):
+        count = DEFAULT_WINES
+    return max(MIN_WINES, min(MAX_WINES, count))
 
 
-def wine_type(wine, settings=None):
-    return (settings or all_settings()).get(f"wine_{wine}_type", "Fehér")
+def wine_name(wine: int) -> str:
+    name = (get_setting(f"wine_{wine}_name", "") or "").strip()
+    return name or DEFAULT_WINE_NAME
 
 
-def wine_color(wine, settings=None):
-    return WINE_COLORS[wine_type(wine, settings)]
+def wine_type(wine: int) -> str:
+    stored = get_setting(f"wine_{wine}_type", "Fehér")
+    return stored if stored in WINE_TYPES else "Fehér"
 
 
-def participant_id():
+def wine_color(wine: int) -> str:
+    return WINE_COLORS[wine_type(wine)]
+
+
+# ---------------------------------------------------------------------------
+# Résztvevő és szavazatok
+# ---------------------------------------------------------------------------
+
+def participant_id() -> str:
+    """Anonim, session-önkénti azonosító."""
     if "participant_id" not in st.session_state:
-        st.session_state.participant_id = hashlib.sha256(os.urandom(32)).hexdigest()
-    return st.session_state.participant_id
+        raw = os.urandom(32) + str(time.time_ns()).encode("utf-8")
+        st.session_state["participant_id"] = hashlib.sha256(raw).hexdigest()[:32]
+    return st.session_state["participant_id"]
 
 
-def replace_multi_votes(participant, wine, section, question, options, expected_revision=None):
-    """Egy kérdés teljes aktuális halmazának atomi cseréje (üres halmaz = törlés)."""
-    with conn() as database:
-        database.execute("BEGIN IMMEDIATE")
-        settings = dict(database.execute("SELECT key,value FROM settings").fetchall())
-        # Régi böngészőesemény nem állíthatja vissza az admin által törölt adatokat.
-        if expected_revision is not None and settings["revision"] != expected_revision:
-            raise ValueError("A kóstoló beállításai megváltoztak. A felület frissült; válassz újra.")
-        if wine < 1 or wine > wine_count(settings):
-            raise ValueError("Ez a tétel már nem aktív. Válassz másik tételt.")
-        if section == "iz" and question == "tannin" and wine_type(wine, settings) == "Fehér":
-            return
-        database.execute("DELETE FROM votes WHERE participant=? AND wine=? AND section=? AND question=?",
-                         (participant, wine, section, question))
-        now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-        database.executemany("INSERT INTO votes(participant,wine,section,question,option,created_at) VALUES (?,?,?,?,?,?)",
-                             [(participant, wine, section, question, option, now) for option in dict.fromkeys(options)])
+def replace_multi_votes(participant: str, wine: int, section: str,
+                        question: str, options: list) -> None:
+    """Egy kérdés összes korábbi szavazatának cseréje az újakra."""
+    unique_options = list(dict.fromkeys(options))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with closing(conn()) as connection, connection:
+        connection.execute(
+            "DELETE FROM votes WHERE participant=? AND wine=? AND section=? AND question=?",
+            (participant, wine, section, question),
+        )
+        connection.executemany(
+            "INSERT OR IGNORE INTO votes"
+            "(participant, wine, section, question, option, created_at) "
+            "VALUES(?,?,?,?,?,?)",
+            [(participant, wine, section, question, opt, now) for opt in unique_options],
+        )
 
 
-def replace_single_vote(participant, wine, section, question, option, expected_revision=None):
-    replace_multi_votes(participant, wine, section, question, [] if option is None else [option], expected_revision)
+def replace_single_vote(participant: str, wine: int, section: str,
+                        question: str, option: str) -> None:
+    replace_multi_votes(participant, wine, section, question, [option])
 
 
-def fetch_votes(wine=None):
-    with conn() as database:
-        if wine is None:
-            return pd.read_sql_query("SELECT * FROM votes ORDER BY id", database)
-        return pd.read_sql_query("SELECT * FROM votes WHERE wine=? ORDER BY id", database, params=(wine,))
-
-
-def result_table(votes, section, question, options=None, single_choice=True):
-    """Egy fő = egy különböző résztvevő; multi esetén nincs százalékos oszlop."""
-    subset = votes[(votes["section"] == section) & (votes["question"] == question)]
-    counts = subset.groupby("option")["participant"].nunique()
-    labels = list(options) if options is not None else sorted(counts.index, key=lambda label: (-counts[label], label))
-    result = pd.DataFrame({"válasz": labels, "fő": [int(counts.get(label, 0)) for label in labels]})
-    if single_choice:
-        total = int(result["fő"].sum())
-        result["százalék"] = result["fő"] * 100 / total if total else 0.0
-    else:
-        result = result[result["fő"] > 0].reset_index(drop=True)
+def my_votes(participant: str, wine: int) -> dict:
+    """A résztvevő saját szavazatai: {(section, question): [option, ...]}."""
+    with closing(conn()) as connection:
+        rows = connection.execute(
+            "SELECT section, question, option FROM votes WHERE participant=? AND wine=?",
+            (participant, wine),
+        ).fetchall()
+    result: dict = {}
+    for section, question, option in rows:
+        result.setdefault((section, question), []).append(option)
     return result
 
 
-def widget_key(kind, wine, section, question, suffix=""):
-    return f"{kind}_w{wine}_{section}_{question}_{suffix}"
+def fetch_votes(wine: int) -> pd.DataFrame:
+    with closing(conn()) as connection:
+        return pd.read_sql_query(
+            "SELECT participant, wine, section, question, option, created_at "
+            "FROM votes WHERE wine = ? ORDER BY id",
+            connection,
+            params=(wine,),
+        )
 
 
-def own_options(wine, section, question):
-    with conn() as database:
-        return [row[0] for row in database.execute(
-            "SELECT option FROM votes WHERE participant=? AND wine=? AND section=? AND question=?",
-            (participant_id(), wine, section, question))]
-
-
-def save_widget_vote(wine, section, question, options, single=False):
-    try:
-        function = replace_single_vote if single else replace_multi_votes
-        function(participant_id(), wine, section, question, options, st.session_state.get("data_revision"))
-        st.session_state["save_notice"] = "A választásod mentve."
-    except (sqlite3.Error, ValueError) as error:
-        # Sikertelen mentéskor a következő render az adatbázisból állítja helyre a widgeteket.
-        st.session_state["data_revision"] = None
-        st.session_state["save_error"] = str(error)
-
-
-def single_callback(wine, section, question, key):
-    save_widget_vote(wine, section, question, st.session_state[key], single=True)
-
-
-def scale_question(wine, section, question, label, options):
-    key = widget_key("radio", wine, section, question)
-    if key not in st.session_state:
-        saved = own_options(wine, section, question)
-        st.session_state[key] = next((option for option in saved if option in options), None)
-    st.radio(label, options, index=None, horizontal=True, key=key,
-             on_change=single_callback, args=(wine, section, question, key))
-
-
-def primary_callback(wine, section):
-    question = "elsodleges_aromak"
-    main_key = widget_key("primary", wine, section, question)
-    categories = st.session_state.get(main_key, [])
-    values = list(categories)
-    for category in PRIMARY:
-        detail_key = widget_key("detail", wine, section, question, category)
-        if category not in categories:
-            st.session_state.pop(detail_key, None)
+def delete_votes(wine: int | None = None) -> None:
+    with closing(conn()) as connection, connection:
+        if wine is None:
+            connection.execute("DELETE FROM votes")
         else:
-            values.extend(f"{category} → {option}" for option in st.session_state.get(detail_key, []))
-    save_widget_vote(wine, section, question, values)
+            connection.execute("DELETE FROM votes WHERE wine = ?", (wine,))
 
 
-def primary_aroma_form(wine, section):
-    st.subheader("Elsődleges aromák")
-    st.caption("Válassz kategóriákat, majd igény szerint konkrét aromákat.")
-    question = "elsodleges_aromak"
-    saved = own_options(wine, section, question)
-    main_key = widget_key("primary", wine, section, question)
-    if main_key not in st.session_state:
-        st.session_state[main_key] = [category for category in PRIMARY if category in saved]
-    categories = st.multiselect("Fő aromakategóriák", list(PRIMARY), key=main_key,
-                               on_change=primary_callback, args=(wine, section))
-    for category in categories:
-        with st.expander(category, expanded=True):
-            key = widget_key("detail", wine, section, question, category)
-            if key not in st.session_state:
-                st.session_state[key] = [option for option in PRIMARY[category] if f"{category} → {option}" in saved]
-            st.multiselect(f"{category} – részletes aromák", PRIMARY[category], key=key,
-                           on_change=primary_callback, args=(wine, section))
+def votes_csv() -> bytes:
+    with closing(conn()) as connection:
+        df = pd.read_sql_query(
+            "SELECT participant, wine, section, question, option, created_at "
+            "FROM votes ORDER BY wine, participant, id",
+            connection,
+        )
+    df.insert(2, "wine_name", df["wine"].map(wine_name))
+    df.insert(3, "wine_type", df["wine"].map(wine_type))
+    return df.to_csv(index=False).encode("utf-8-sig")
 
 
-def multi_callback(wine, section, question, groups):
-    values = []
-    for group in groups:
-        key = widget_key("multi", wine, section, question, group)
-        values.extend(f"{group} → {option}" for option in st.session_state.get(key, []))
-    save_widget_vote(wine, section, question, values)
+# ---------------------------------------------------------------------------
+# Eredményszámítás
+# ---------------------------------------------------------------------------
 
+def result_table(votes: pd.DataFrame, section: str, question: str,
+                 options: list | None = None, multi: bool = False,
+                 main_only: bool = False) -> pd.DataFrame:
+    """
+    Single choice: Válasz, Fő, Százalék (az összes leadott szavazat arányában).
+    Multi choice: Válasz, Fő (százalék nélkül), csak legalább 1 szavazatot kapott elemek.
+    """
+    subset = votes[(votes["section"] == section) & (votes["question"] == question)]
+    if main_only:
+        subset = subset[~subset["option"].str.contains(ARROW, regex=False)]
+    counts = subset.groupby("option")["participant"].nunique()
 
-def multi_aroma_block(wine, question, title, groups):
-    st.subheader(title)
-    saved = own_options(wine, "iz", question)
-    for group, options in groups.items():
-        key = widget_key("multi", wine, "iz", question, group)
-        if key not in st.session_state:
-            st.session_state[key] = [option for option in options if f"{group} → {option}" in saved]
-    for group, options in groups.items():
-        st.multiselect(group, options, key=widget_key("multi", wine, "iz", question, group),
-                       on_change=multi_callback, args=(wine, "iz", question, groups))
+    if multi:
+        counts = counts[counts > 0].sort_values(ascending=False, kind="stable")
+        return pd.DataFrame({"Válasz": list(counts.index), "Fő": [int(v) for v in counts.values]})
 
-
-CSS = """<style>
-.block-container{max-width:900px;padding-top:2rem;padding-bottom:3rem}
-.gt-header{display:flex;gap:20px;align-items:center;margin-bottom:1.3rem}
-.gt-header h1{font-size:clamp(1.6rem,4vw,2.5rem);line-height:1.18;margin:0;overflow-wrap:anywhere}
-.gt-brand{font-size:.9rem;color:inherit;opacity:.75;letter-spacing:.05em;margin:8px 0}
-.result-chart{display:grid;gap:12px;margin:12px 0 24px}
-.result-row{display:grid;grid-template-columns:minmax(110px,180px) minmax(100px,1fr) 110px;align-items:center;gap:12px}
-.result-label{font-size:.95rem;overflow-wrap:anywhere;line-height:1.3}
-.result-track{height:22px;border:1px solid black;background:#f1f1f1;overflow:hidden;border-radius:3px}
-.result-fill{height:100%;min-width:0}
-.result-value{font-variant-numeric:tabular-nums;text-align:right;font-size:.9rem;white-space:nowrap}
-div[data-testid="stRadio"] [role="radiogroup"]{flex-wrap:wrap;gap:4px 16px}
-div[data-testid="stRadio"] label{min-height:44px;align-items:center}
-div[data-baseweb="select"]>div{min-height:44px}
-.stButton button,.stDownloadButton button{min-height:44px}
-@media(max-width:600px){
- .block-container{padding:1rem .8rem 2rem}
- .gt-header{gap:12px;flex-wrap:wrap}
- .result-row{grid-template-columns:82px minmax(60px,1fr) 82px;gap:7px}
- .result-value,.result-label{font-size:.8rem}
- .result-track{height:20px}
- button[data-baseweb="tab"]{padding-left:8px;padding-right:8px}
-}
-</style>"""
-
-
-def chart_row(label, width, color, value):
-    # Nincs minimumszélesség; nulla szavazat pontosan 0%-os kitöltést kap.
-    return (f'<div class="result-row"><div class="result-label">{html.escape(str(label))}</div>'
-            f'<div class="result-track" aria-hidden="true"><div class="result-fill" '
-            f'style="width:{width:.6f}%;background:{color}"></div></div>'
-            f'<div class="result-value">{html.escape(value)}</div></div>')
-
-
-def render_single_summary_chart(table, color):
-    max_pct = float(table["százalék"].max()) if not table.empty else 0.0
+    option_list = options if options is not None else list(counts.index)
+    total = int(counts.sum())
     rows = []
-    for _, row in table.iterrows():
-        pct = float(row["százalék"])
-        fill_color = color if abs(pct - max_pct) < 0.05 else "rgb(184, 184, 184)"
-        # Egy tizedesre kerekítve a kis, de nem nulla arányok is láthatók.
-        value = f'{pct:.1f}% ({int(row["fő"])} fő)'.replace(".0%", "%").replace(".", ",")
-        rows.append(chart_row(row["válasz"], pct, fill_color, value))
-    st.markdown('<div class="result-chart">' + "".join(rows) + "</div>", unsafe_allow_html=True)
+    for option in option_list:
+        count = int(counts.get(option, 0))
+        pct = (count / total * 100) if total else 0.0
+        rows.append((option, count, pct))
+    return pd.DataFrame(rows, columns=["Válasz", "Fő", "Százalék"])
 
 
-def render_multi_summary_chart(table, color):
-    if table.empty:
-        st.caption("Még nincs aromaszavazat.")
-        return
-    maximum = int(table["fő"].max())
-    rows = [chart_row(row["válasz"], int(row["fő"]) * 100 / maximum, color, f'{int(row["fő"])} fő')
-            for _, row in table.iterrows()]
-    st.markdown('<div class="result-chart">' + "".join(rows) + "</div>", unsafe_allow_html=True)
+def respondent_count(votes: pd.DataFrame, section: str, question: str) -> int:
+    subset = votes[(votes["section"] == section) & (votes["question"] == question)]
+    return int(subset["participant"].nunique())
 
 
-def wine_summary(wine, settings=None):
-    settings = settings or all_settings()
-    votes = fetch_votes(wine)
-    color = wine_color(wine, settings)
-    st.header(wine_name(wine, settings))
-    st.caption({"Fehér": "Fehérbor", "Rozé": "Rozébor", "Vörös": "Vörösbor"}[wine_type(wine, settings)])
-    st.write(f'**{votes["participant"].nunique()} résztvevő** értékelte ezt a tételt.')
-    st.caption("Élő összesítés · frissítés 3 másodpercenként · a skálákon a legtöbb szavazatot kapott válaszok színesek.")
-    st.subheader("Illat")
-    for question, (label, options) in SCENT_SCALES.items():
-        st.write(f"**{label}**")
-        render_single_summary_chart(result_table(votes, "illat", question, options), color)
-    st.subheader("Ízösszetétel")
-    for question, (label, options) in TASTE_SCALES.items():
-        if question == "tannin" and wine_type(wine, settings) == "Fehér":
+# ---------------------------------------------------------------------------
+# Segédfüggvények
+# ---------------------------------------------------------------------------
+
+def esc(text: str) -> str:
+    return html.escape(str(text), quote=True)
+
+
+def slug(text: str) -> str:
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-zA-Z0-9]+", "_", ascii_text).strip("_").lower()
+
+
+@st.cache_data
+def logo_base64() -> str:
+    if LOGO_PATH.exists():
+        return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    return ""
+
+
+def inject_css() -> None:
+    st.markdown(f"<style>{CSS}</style>", unsafe_allow_html=True)
+
+
+def render_header() -> None:
+    encoded_logo = logo_base64()
+    logo_html = ""
+    if encoded_logo:
+        logo_html = (
+            f'<img class="applogo" src="data:image/jpeg;base64,{encoded_logo}" '
+            'alt="GeoTerroir Kutatócsoport logó">'
+        )
+    st.markdown(
+        f'<div class="apphead"><div class="apptitle">{esc(APP_TITLE)}</div>{logo_html}</div>',
+        unsafe_allow_html=True,
+    )
+    tasting_title = (get_setting("tasting_title", "") or "").strip()
+    if tasting_title:
+        st.markdown(f'<div class="tastingtitle">{esc(tasting_title)}</div>', unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Szavazófelület: callbackek
+# ---------------------------------------------------------------------------
+
+def save_single_vote(wine: int, section: str, question: str, widget_key: str) -> None:
+    value = st.session_state.get(widget_key)
+    if value is not None:
+        replace_single_vote(participant_id(), wine, section, question, value)
+
+
+def primary_main_key(wine: int, section: str) -> str:
+    return f"aroma_main_w{wine}_{section}"
+
+
+def primary_detail_key(wine: int, section: str, main: str) -> str:
+    return f"aroma_det_w{wine}_{section}_{slug(main)}"
+
+
+def save_primary_aromas(wine: int, section: str) -> None:
+    selected_mains = st.session_state.get(primary_main_key(wine, section), [])
+    options = []
+    for main, details in PRIMARY_AROMAS.items():
+        if main not in selected_mains:
             continue
-        st.write(f"**{label}**")
-        render_single_summary_chart(result_table(votes, "iz", question, options), color)
-    st.caption("Az aromák sávhossza a legtöbb szavazatot kapott aromához viszonyított darabszám; nem százalék.")
-    for section, question, title, options in [
-        ("illat", "elsodleges_aromak", "Illat – elsődleges aromák", list(PRIMARY)),
-        ("iz", "elsodleges_aromak", "Íz – elsődleges aromák", list(PRIMARY)),
-        ("iz", "masodlagos_aromak", "Másodlagos aromák", None),
-        ("iz", "harmadlagos_aromak", "Harmadlagos aromák", None),
-    ]:
-        st.subheader(title)
-        render_multi_summary_chart(result_table(votes, section, question, options, single_choice=False), color)
+        options.append(main)
+        chosen = st.session_state.get(primary_detail_key(wine, section, main), [])
+        options.extend(f"{main}{ARROW}{d}" for d in details if d in chosen)
+    replace_multi_votes(participant_id(), wine, section, PRIMARY_QUESTION, options)
 
 
-def synchronize_session(settings):
-    revision = settings["revision"]
-    if st.session_state.get("data_revision") != revision:
-        for key in list(st.session_state):
-            if key.startswith(("radio_w", "primary_w", "detail_w", "multi_w")):
-                del st.session_state[key]
-        st.session_state["data_revision"] = revision
-        return True
-    return False
+def group_key(wine: int, section: str, group: str) -> str:
+    return f"aroma_grp_w{wine}_{section}_{slug(group)}"
+
+
+def save_group_aromas(wine: int, section: str) -> None:
+    options = []
+    for group, items in GROUPS_BY_SECTION[section].items():
+        chosen = st.session_state.get(group_key(wine, section, group), [])
+        options.extend(f"{group}{ARROW}{i}" for i in items if i in chosen)
+    replace_multi_votes(participant_id(), wine, section, GROUP_QUESTION, options)
+
+
+# ---------------------------------------------------------------------------
+# Szavazófelület: widgetek
+# ---------------------------------------------------------------------------
+
+def scale_question(wine: int, section: str, question_key: str, label: str,
+                   options: list, mine: dict) -> None:
+    saved = mine.get((section, question_key), [])
+    index = options.index(saved[0]) if saved and saved[0] in options else None
+    widget_key = f"radio_w{wine}_{section}_{question_key}"
+    st.radio(
+        label,
+        options,
+        index=index,
+        horizontal=True,
+        key=widget_key,
+        on_change=save_single_vote,
+        args=(wine, section, question_key, widget_key),
+    )
+
+
+def primary_aroma_form(wine: int, section: str, mine: dict) -> None:
+    saved = mine.get((section, PRIMARY_QUESTION), [])
+    saved_mains = [m for m in PRIMARY_AROMAS if m in saved]
+    selected = st.multiselect(
+        "Aromakategóriák",
+        list(PRIMARY_AROMAS),
+        default=saved_mains,
+        key=primary_main_key(wine, section),
+        placeholder="Válassz kategóriát",
+        on_change=save_primary_aromas,
+        args=(wine, section),
+    )
+    for main, details in PRIMARY_AROMAS.items():
+        if main not in selected:
+            continue
+        saved_details = [d for d in details if f"{main}{ARROW}{d}" in saved]
+        with st.expander(f"{main} – részletes aromák", expanded=True):
+            st.multiselect(
+                f"{main} – részletek",
+                details,
+                default=saved_details,
+                key=primary_detail_key(wine, section, main),
+                placeholder="Válassz konkrét aromát",
+                label_visibility="collapsed",
+                on_change=save_primary_aromas,
+                args=(wine, section),
+            )
+
+
+def multi_aroma_block(wine: int, section: str, groups: dict, mine: dict) -> None:
+    saved = set(mine.get((section, GROUP_QUESTION), []))
+    for group, items in groups.items():
+        default = [i for i in items if f"{group}{ARROW}{i}" in saved]
+        st.multiselect(
+            group,
+            items,
+            default=default,
+            key=group_key(wine, section, group),
+            placeholder="Válassz",
+            on_change=save_group_aromas,
+            args=(wine, section),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Összesítő diagramok
+# ---------------------------------------------------------------------------
+
+def bar_row(label: str, fill: str, width_pct: float, right_text: str, wide: bool = False) -> str:
+    width = max(0.0, min(100.0, width_pct))
+    border = "border:1px solid #000;" if width > 0 else ""
+    row_class = "vrow wide" if wide else "vrow"
+    return (
+        f'<div class="{row_class}"><div class="vlabel">{esc(label)}</div>'
+        f'<div class="vtrack"><div class="vbar" style="width:{width:.2f}%;'
+        f'background:{fill};{border}"></div></div>'
+        f'<div class="vval">{esc(right_text)}</div></div>'
+    )
+
+
+def render_single_summary_chart(title: str, table: pd.DataFrame, color: str) -> None:
+    parts = [f'<div class="qtitle">{esc(title)}</div>']
+    if table.empty or int(table["Fő"].sum()) == 0:
+        parts.append('<div class="vempty">Még nincs szavazat.</div>')
+    else:
+        max_pct = float(table["Százalék"].max())
+        for answer, count, pct in zip(table["Válasz"], table["Fő"], table["Százalék"]):
+            is_winner = abs(pct - max_pct) < 0.05
+            fill = color if is_winner else NEUTRAL_COLOR
+            parts.append(bar_row(answer, fill, pct, f"{pct:.0f}% ({count} fő)"))
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
+def render_multi_summary_chart(title: str, table: pd.DataFrame, color: str,
+                               respondents: int) -> None:
+    parts = [f'<div class="qtitle">{esc(title)}</div>']
+    if table.empty or respondents == 0:
+        parts.append('<div class="vempty">Még nincs szavazat.</div>')
+    else:
+        for answer, count in zip(table["Válasz"], table["Fő"]):
+            width = count / respondents * 100
+            parts.append(bar_row(answer, color, width, f"{count} fő", wide=True))
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
+def wine_summary(wine: int) -> None:
+    votes = fetch_votes(wine)
+    color = wine_color(wine)
+    type_name = wine_type(wine)
+
+    st.markdown(
+        f'<div class="wtitle">{esc(wine_name(wine))}</div>'
+        f'<div class="wsub">{WINE_TYPE_LABELS[type_name]}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Szavazók száma ennél a tételnél: {int(votes['participant'].nunique())}")
+
+    st.subheader("Illat")
+    for question_key, label, options in SMELL_SCALES:
+        table = result_table(votes, SMELL_SECTION, question_key, options=options)
+        render_single_summary_chart(label, table, color)
+    render_multi_summary_chart(
+        "Illat – elsődleges aromák",
+        result_table(votes, SMELL_SECTION, PRIMARY_QUESTION, multi=True, main_only=True),
+        color,
+        respondent_count(votes, SMELL_SECTION, PRIMARY_QUESTION),
+    )
+
+    st.subheader("Ízösszetétel")
+    for question_key, label, options in TASTE_SCALES:
+        if question_key == TANNIN_KEY and type_name == "Fehér":
+            continue
+        table = result_table(votes, TASTE_SCALE_SECTION, question_key, options=options)
+        render_single_summary_chart(label, table, color)
+    render_multi_summary_chart(
+        "Íz – elsődleges aromák",
+        result_table(votes, TASTE_AROMA_SECTION, PRIMARY_QUESTION, multi=True, main_only=True),
+        color,
+        respondent_count(votes, TASTE_AROMA_SECTION, PRIMARY_QUESTION),
+    )
+    render_multi_summary_chart(
+        "Másodlagos aromák",
+        result_table(votes, SECONDARY_SECTION, GROUP_QUESTION, multi=True),
+        color,
+        respondent_count(votes, SECONDARY_SECTION, GROUP_QUESTION),
+    )
+    render_multi_summary_chart(
+        "Harmadlagos aromák",
+        result_table(votes, TERTIARY_SECTION, GROUP_QUESTION, multi=True),
+        color,
+        respondent_count(votes, TERTIARY_SECTION, GROUP_QUESTION),
+    )
 
 
 @st.fragment(run_every="3s")
-def live_summary_fragment(wine):
-    settings = all_settings()
-    if settings["revision"] != st.session_state.get("data_revision"):
-        st.rerun()  # Admin-változáskor az egész szavazófelületet is szinkronizáljuk.
-    wine_summary(wine, settings)
+def live_summary_fragment(wine: int) -> None:
+    """Kb. 3 másodpercenként újraolvassa az adatbázist."""
+    wine_summary(wine)
 
 
-def config_value(key, default=""):
-    if os.environ.get(key):
-        return os.environ[key]
+# ---------------------------------------------------------------------------
+# Admin
+# ---------------------------------------------------------------------------
+
+def expected_admin_password() -> str:
+    env_value = os.environ.get("ADMIN_PASSWORD")
+    if env_value:
+        return env_value
     try:
-        return str(st.secrets.get(key, default))
-    except FileNotFoundError:
-        return default
+        secret_value = st.secrets["ADMIN_PASSWORD"]
+        if secret_value:
+            return str(secret_value)
+    except Exception:
+        pass
+    return DEFAULT_ADMIN_PASSWORD
 
 
-def public_vote_url(value):
-    parts = urlsplit(value.strip())
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
-        raise ValueError("Teljes http:// vagy https:// címet adj meg, felhasználónév és jelszó nélkül.")
-    query = urlencode([(key, val) for key, val in parse_qsl(parts.query, keep_blank_values=True) if key != "admin"])
-    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", query, ""))
+def admin_panel() -> None:
+    st.markdown("### Admin felület")
 
-
-def qr_image(url):
-    buffer = io.BytesIO()
-    qrcode.make(url).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def show_qr(url, download=False):
-    image = qr_image(url)
-    st.image(image, width=220, caption="Olvasd be a telefonod kamerájával!")
-    st.link_button("Szavazófelület megnyitása", url)
-    if download:
-        st.download_button("QR-kód letöltése", image, "borkostolo_qr.png", "image/png")
-
-
-def save_settings(values):
-    with conn() as database:
-        database.execute("BEGIN IMMEDIATE")
-        database.executemany("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                             [(key, str(value)) for key, value in values.items()])
-        database.execute("UPDATE settings SET value=CAST(value AS INTEGER)+1 WHERE key='revision'")
-
-
-def delete_votes(wine=None):
-    with conn() as database:
-        database.execute("BEGIN IMMEDIATE")
-        if wine is None:
-            database.execute("DELETE FROM votes")
-        else:
-            database.execute("DELETE FROM votes WHERE wine=?", (wine,))
-        database.execute("UPDATE settings SET value=CAST(value AS INTEGER)+1 WHERE key='revision'")
-
-
-def export_votes():
-    with conn() as database:
-        return pd.read_sql_query("""SELECT v.participant,v.wine,
-            COALESCE(n.value,CAST(v.wine AS TEXT)) AS wine_name,
-            COALESCE(t.value,'Fehér') AS wine_type,
-            v.section,v.question,v.option,v.created_at FROM votes v
-            LEFT JOIN settings n ON n.key='wine_'||v.wine||'_name'
-            LEFT JOIN settings t ON t.key='wine_'||v.wine||'_type' ORDER BY v.id""", database)
-
-
-def admin_panel():
-    st.header("Adminfelület")
-    password = config_value("ADMIN_PASSWORD", "boradmin26")
-    digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    if not hmac.compare_digest(st.session_state.get("admin_token", ""), digest):
-        with st.form("admin_login"):
-            candidate = st.text_input("Admin jelszó", type="password")
-            submitted = st.form_submit_button("Belépés")
-        if submitted:
-            if hmac.compare_digest(candidate.encode("utf-8"), password.encode("utf-8")):
-                st.session_state["admin_token"] = digest
+    if not st.session_state.get("admin_ok"):
+        candidate = st.text_input("Admin jelszó", type="password", key="admin_pw_input")
+        if st.button("Belépés", key="admin_login_button"):
+            if hmac.compare_digest(candidate.encode("utf-8"),
+                                   expected_admin_password().encode("utf-8")):
+                st.session_state["admin_ok"] = True
                 st.rerun()
-            st.error("Hibás jelszó.")
+            else:
+                st.error("Hibás jelszó.")
         return
-    if st.button("Kijelentkezés"):
-        st.session_state.pop("admin_token", None)
-        st.rerun()
-    if password == "boradmin26":
-        st.warning("Fejlesztési jelszó aktív. Nyilvános használat előtt állítsd be az ADMIN_PASSWORD értékét.")
-    if notice := st.session_state.pop("admin_notice", None):
-        st.success(notice)
-    settings = all_settings()
-    count = int(st.number_input("Hány tétel legyen?", min_value=1, max_value=50,
-                                value=wine_count(settings), step=1, key="admin_wine_count"))
-    st.caption("A darabszám és a többi módosítás a Beállítások mentése gombbal lép életbe. A kivett tételek adatai megmaradnak.")
-    with st.form("admin_settings"):
-        title = st.text_input("Kóstoló címe", value=settings["title"], max_chars=200)
-        public_url = st.text_input("Nyilvános szavazó URL (QR-kódhoz)", value=settings["public_url"],
-                                   placeholder="https://valami.streamlit.app/")
-        values = {"wine_count": count}
-        for wine in range(1, count + 1):
-            st.markdown(f"**{wine}. tétel**")
-            values[f"wine_{wine}_name"] = st.text_input("Tétel neve", value=wine_name(wine, settings),
-                                                       key=f"admin_name_{wine}", max_chars=160)
-            values[f"wine_{wine}_type"] = st.selectbox("Bortípus", WINE_TYPES,
-                                                      index=WINE_TYPES.index(wine_type(wine, settings)), key=f"admin_type_{wine}")
-        if st.form_submit_button("Beállítások mentése"):
-            try:
-                values["title"] = title.strip() or DEFAULT_TITLE
-                values["public_url"] = public_vote_url(public_url) if public_url.strip() else ""
-                for wine in range(1, count + 1):
-                    values[f"wine_{wine}_name"] = values[f"wine_{wine}_name"].strip() or f"{wine}. tétel"
-                save_settings(values)
-                st.session_state["admin_notice"] = "A beállítások mentve."
-                st.rerun()
-            except ValueError as error:
-                st.error(str(error))
-    st.subheader("Megosztás")
-    url = config_value("PUBLIC_URL") or settings["public_url"]
-    if url:
-        try:
-            show_qr(public_vote_url(url), download=True)
-        except ValueError as error:
-            st.error(str(error))
-    else:
-        st.info("A QR-kódhoz add meg és mentsd a telefonokról elérhető nyilvános URL-t.")
-    st.subheader("Szavazatok exportálása")
-    st.download_button("Szavazatok letöltése CSV-ben", export_votes().to_csv(index=False).encode("utf-8-sig"),
-                       "borkostolo_szavazatok.csv", "text/csv")
-    st.subheader("Szavazatok törlése")
-    # Archivált tételeket is lehet külön törölni.
-    existing_wines = fetch_votes()["wine"].unique().tolist()
-    wine_ids = sorted(set(range(1, wine_count(settings) + 1)) | set(existing_wines))
-    selected = st.selectbox("Törlendő tétel", wine_ids, format_func=lambda wine: f"{wine}. – {wine_name(wine, settings)}",
-                            key="delete_wine")
-    with st.form("delete_one"):
-        confirmed = st.checkbox("Megerősítem a kiválasztott tétel szavazatainak törlését")
-        if st.form_submit_button("Tétel szavazatainak törlése"):
-            if confirmed:
-                delete_votes(selected)
-                st.session_state["admin_notice"] = "A kiválasztott tétel szavazatai törölve."
-                st.rerun()
-            st.error("A törléshez jelöld be a megerősítést.")
-    with st.form("delete_all"):
-        confirmed = st.checkbox("Megerősítem minden tétel összes szavazatának törlését")
-        if st.form_submit_button("Minden szavazat törlése"):
-            if confirmed:
-                delete_votes()
-                st.session_state["admin_notice"] = "Minden szavazat törölve."
-                st.rerun()
-            st.error("A törléshez jelöld be a megerősítést.")
+
+    st.markdown("#### Kóstoló beállításai")
+    title = st.text_input(
+        "Kóstoló címe", value=get_setting("tasting_title", "") or "", key="admin_title"
+    )
+    count = int(st.number_input(
+        "Hány tétel legyen?", min_value=MIN_WINES, max_value=MAX_WINES,
+        value=wine_count(), step=1, key="admin_wine_count",
+    ))
+
+    new_names, new_types = {}, {}
+    for i in range(1, count + 1):
+        name_col, type_col = st.columns([3, 2])
+        with name_col:
+            new_names[i] = st.text_input(
+                f"{i}. tétel neve",
+                value=(get_setting(f"wine_{i}_name", "") or ""),
+                placeholder=DEFAULT_WINE_NAME,
+                key=f"admin_name_{i}",
+            )
+        with type_col:
+            new_types[i] = st.selectbox(
+                f"{i}. tétel típusa",
+                WINE_TYPES,
+                index=WINE_TYPES.index(wine_type(i)),
+                key=f"admin_type_{i}",
+            )
+
+    if st.button("Beállítások mentése", type="primary", key="admin_save"):
+        values = {"tasting_title": title.strip(), "wine_count": count}
+        for i in range(1, count + 1):
+            values[f"wine_{i}_name"] = new_names[i].strip()
+            values[f"wine_{i}_type"] = new_types[i]
+        set_many_settings(values)
+        st.success("A beállítások mentve.")
+
+    st.divider()
+    st.markdown("#### Szavazatok exportja")
+    st.download_button(
+        "Szavazatok letöltése (CSV)",
+        data=votes_csv(),
+        file_name="szavazatok.csv",
+        mime="text/csv",
+        key="admin_csv",
+    )
+
+    st.divider()
+    st.markdown("#### Szavazatok törlése")
+    current_count = wine_count()
+    wine_to_clear = st.selectbox(
+        "Törlendő tétel",
+        list(range(1, current_count + 1)),
+        format_func=lambda i: f"{i}. {wine_name(i)}",
+        key="admin_clear_wine",
+    )
+    confirm_one = st.checkbox("Biztosan törlöm a kiválasztott tétel összes szavazatát",
+                              key="admin_confirm_one")
+    if st.button("Tétel szavazatainak törlése", key="admin_clear_one", disabled=not confirm_one):
+        delete_votes(wine_to_clear)
+        st.success(f"A(z) {wine_to_clear}. tétel szavazatai törölve.")
+
+    confirm_all = st.checkbox("Biztosan törlöm az ÖSSZES szavazatot", key="admin_confirm_all")
+    if st.button("Minden szavazat törlése", key="admin_clear_all", disabled=not confirm_all):
+        delete_votes(None)
+        st.success("Minden szavazat törölve.")
+
+    st.divider()
+    st.markdown("#### Élő összesítés")
+    preview_wine = st.selectbox(
+        "Tétel",
+        list(range(1, current_count + 1)),
+        format_func=lambda i: f"{i}. {wine_name(i)}",
+        key="admin_preview_wine",
+    )
+    live_summary_fragment(preview_wine)
 
 
-def render_header(title):
-    logo = BASE_DIR / "GEOTerroir_HUN.jpg"
-    logo_html = ""
-    if logo.exists():
-        import base64
-        encoded = base64.b64encode(logo.read_bytes()).decode("ascii")
-        logo_html = f'<img src="data:image/jpeg;base64,{encoded}" alt="GeoTerroir Kutatócsoport logója" style="width:110px;max-width:28%;height:auto">'
-    st.markdown('<div class="gt-header">' + logo_html + '<div><p class="gt-brand">GeoTerroir Kutatócsoport</p>'
-                + f'<h1>{html.escape(title)}</h1></div></div>', unsafe_allow_html=True)
+# ---------------------------------------------------------------------------
+# Főprogram
+# ---------------------------------------------------------------------------
 
-
-def main():
-    st.set_page_config(page_title=DEFAULT_TITLE, page_icon="🍷", layout="centered")
-    init_db()
-    st.markdown(CSS, unsafe_allow_html=True)
-    settings = all_settings()
-    render_header(settings["title"])
-    if st.query_params.get("admin") == "1":
-        admin_panel()
-        return
-    participant_id()
-    synchronize_session(settings)
-    count = wine_count(settings)
-    if st.session_state.get("active_wine", 1) > count:
+def voting_interface() -> None:
+    total = wine_count()
+    if st.session_state.get("active_wine", 1) > total:
         st.session_state["active_wine"] = 1
-    wine = st.selectbox("Melyik tételt értékeled?", list(range(1, count + 1)),
-                        format_func=lambda value: f"{value}. – {wine_name(value, settings)}", key="active_wine")
-    st.caption(f"{wine_type(wine, settings)} · Minden választás automatikusan mentődik. Bármikor módosíthatod.")
-    if error := st.session_state.pop("save_error", None):
-        st.error(f"A választás nem mentődött: {error}")
-    elif notice := st.session_state.pop("save_notice", None):
-        st.success(notice)
-    scent_tab, taste_tab, summary_tab = st.tabs(["Illat", "Ízösszetétel", "Összesítés"])
-    with scent_tab:
-        for question, (label, options) in SCENT_SCALES.items():
-            scale_question(wine, "illat", question, label, options)
-        primary_aroma_form(wine, "illat")
-    with taste_tab:
-        for question, (label, options) in TASTE_SCALES.items():
-            if question == "tannin" and wine_type(wine, settings) == "Fehér":
+
+    wine = st.selectbox(
+        "Melyik tételt értékeled?",
+        list(range(1, total + 1)),
+        format_func=lambda i: f"{i}. {wine_name(i)}",
+        key="active_wine",
+    )
+    type_name = wine_type(wine)
+    mine = my_votes(participant_id(), wine)
+
+    tab_smell, tab_taste, tab_summary = st.tabs(["Illat", "Ízösszetétel", "Összesítés"])
+
+    with tab_smell:
+        for question_key, label, options in SMELL_SCALES:
+            scale_question(wine, SMELL_SECTION, question_key, label, options, mine)
+        st.markdown("**Elsődleges aromák**")
+        primary_aroma_form(wine, SMELL_SECTION, mine)
+
+    with tab_taste:
+        for question_key, label, options in TASTE_SCALES:
+            if question_key == TANNIN_KEY and type_name == "Fehér":
                 continue
-            scale_question(wine, "iz", question, label, options)
-        primary_aroma_form(wine, "iz")
-        multi_aroma_block(wine, "masodlagos_aromak", "Másodlagos aromák", SECONDARY)
-        multi_aroma_block(wine, "harmadlagos_aromak", "Harmadlagos aromák", TERTIARY)
-    with summary_tab:
+            scale_question(wine, TASTE_SCALE_SECTION, question_key, label, options, mine)
+        st.markdown("**Elsődleges aromák**")
+        primary_aroma_form(wine, TASTE_AROMA_SECTION, mine)
+        st.markdown("**Másodlagos aromák**")
+        multi_aroma_block(wine, SECONDARY_SECTION, SECONDARY_AROMAS, mine)
+        st.markdown("**Harmadlagos aromák**")
+        multi_aroma_block(wine, TERTIARY_SECTION, TERTIARY_AROMAS, mine)
+
+    with tab_summary:
         live_summary_fragment(wine)
-    url = config_value("PUBLIC_URL") or settings["public_url"]
-    if url:
-        with st.expander("Megosztás QR-kóddal"):
-            try:
-                show_qr(public_vote_url(url))
-            except ValueError:
-                st.info("A megosztási címet az admin tudja javítani.")
-    st.caption("Anonim böngészőmunkamenet. Az oldal újratöltése vagy új böngészőablak új résztvevőazonosítót adhat.")
+
+
+def main() -> None:
+    st.set_page_config(page_title=APP_TITLE, page_icon="🍷", layout="centered")
+    init_db()
+    inject_css()
+    render_header()
+
+    if str(st.query_params.get("admin", "")) == "1":
+        admin_panel()
+    else:
+        voting_interface()
 
 
 if __name__ == "__main__":
