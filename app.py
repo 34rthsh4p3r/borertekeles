@@ -524,7 +524,7 @@ def live_summary_fragment(selected_summary_wine):
 
 def admin_panel():
     st.title("Admin")
-    admin_pw = os.getenv("ADMIN_PASSWORD")
+    admin_pw = os.getenv("ADMIN_PASSWORD", "boradmin26")
     if not admin_pw:
         st.error("Az ADMIN_PASSWORD környezeti változó nincs beállítva; az admin felület nem érhető el.")
         return
