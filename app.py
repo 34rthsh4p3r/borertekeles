@@ -1,10 +1,3 @@
-"""Design 1 – bordó-fehér borkóstoló, Streamlit >= 1.41.
-
-Indítás: python -m streamlit run bor_kostolo_design1.py
-Az eredeti wine_votes.db és az opcionális GEOTerroir_HUN.jpg maradjon
-a programmal azonos mappában. Admin: ?admin=1, ADMIN_PASSWORD változó.
-"""
-
 import os
 import sqlite3
 import hashlib
