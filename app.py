@@ -105,7 +105,7 @@ SCALE_QUESTIONS = {
 
     "illat": [
 
-        ("intenzitas", "Illat – intenzitás", ["Visszafogott", "Közepes", "Határozott"]),
+        ("intenzitas", "Intenzitás", ["Visszafogott", "Közepes", "Határozott"]),
 
     ],
 
@@ -490,7 +490,7 @@ def choice_buttons(options, state_key, multi=False, columns=3, label_fn=None):
             chosen = option in selected if multi else option == selected
             label = label_fn(option) if label_fn else str(option)
             st.button(
-                f"✓ {label}" if chosen else label,
+                label,
                 key=f"btn_{state_key}_{index}",
                 type="primary" if chosen else "secondary",
                 width="content",
@@ -569,7 +569,7 @@ def save_multi_aroma_votes(wine, section_key, data, widget_keys):
 
 def multi_aroma_block(wine, section_key, data, title):
 
-    st.subheader(title)
+    st.header(title)
 
     widget_keys = {
 
@@ -1285,7 +1285,7 @@ def main():
             height: auto;
             padding: 0.35rem 0.65rem;
             border: 2px solid #111 !important;
-            border-radius: 0.15rem;
+            border-radius: 0.55rem;
             background: #fff !important;
             color: #111 !important;
             box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.12);
@@ -1303,11 +1303,11 @@ def main():
             box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.2);
         }
         [class*="st-key-choice_group_"] .stButton button[kind="primary"] {
-            background: #111 !important;
-            color: #fff !important;
+            background: rgb(244, 241, 186) !important;
+            color: #111 !important;
         }
         [class*="st-key-choice_group_"] .stButton button[kind="primary"]:hover {
-            background: #333 !important;
+            background: rgb(244, 241, 186) !important;
         }
         [class*="st-key-choice_group_"] .stButton button:focus-visible {
             outline: 3px solid #ab7540 !important;
@@ -1494,25 +1494,15 @@ def main():
 
     st.header("Illat")
 
-    scale_question(wine, "illat", "intenzitas", "Illat – intenzitás", ["Visszafogott", "Közepes", "Határozott"])
+    scale_question(wine, "illat", "intenzitas", "Intenzitás", ["Visszafogott", "Közepes", "Határozott"])
 
     st.divider()
 
-    primary_aroma_form(wine, "illat", "Illat – elsődleges aromák")
+    st.header("Elsődleges aromák")
 
+    primary_aroma_form(wine, "illat", "Illat")
 
-
-    st.divider()
-
-    st.header("Ízösszetétel")
-
-    for qkey, label, options in SCALE_QUESTIONS["iz"]:
-
-        scale_question(wine, "iz", qkey, label, options)
-
-        st.divider()
-
-    primary_aroma_form(wine, "iz", "Íz – elsődleges aromák")
+    primary_aroma_form(wine, "iz", "Íz")
 
 
 
@@ -1529,6 +1519,14 @@ def main():
 
 
     st.divider()
+
+    st.header("Ízösszetétel")
+
+    for qkey, label, options in SCALE_QUESTIONS["iz"]:
+
+        scale_question(wine, "iz", qkey, label, options)
+
+        st.divider()
 
     st.caption("Geoterroir Kutatócsoport")
 
