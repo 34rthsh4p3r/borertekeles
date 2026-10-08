@@ -11,7 +11,6 @@ import hashlib
 import html
 import inspect
 import inspect
-from contextlib import nullcontext
 import time
 from datetime import datetime
 from pathlib import Path
@@ -261,7 +260,7 @@ def choice_buttons(options, state_key, multi=False, columns=3, label_fn=None):
         st.session_state[state_key] = [] if multi else None
     selected = st.session_state[state_key]
     columns = max(1, columns)
-    with st.container(key=f"multi_{state_key}") if multi else nullcontext():
+    button_area = st.container(key=f"multi_{state_key}") if multi else st
     for start in range(0, len(options), columns):
         row_options = options[start:start + columns]
         cols = st.columns(columns, gap="small")
@@ -275,19 +274,19 @@ def choice_buttons(options, state_key, multi=False, columns=3, label_fn=None):
                 args=(state_key, option, multi),
                 **full_width_kwargs(st.button),
             )
-        for start in range(0, len(options), columns):
-            row_options = options[start:start + columns]
-            cols = st.columns(columns, gap="small")
-            for offset, option in enumerate(row_options):
-                chosen = option in selected if multi else option == selected
-                cols[offset].button(
-                    label_fn(option) if label_fn else str(option),
-                    key=f"btn_{state_key}_{start + offset}",
-                    type="primary" if chosen else "secondary",
-                    on_click=update_choice,
-                    args=(state_key, option, multi),
-                    **full_width_kwargs(st.button),
-                )
+    for start in range(0, len(options), columns):
+        row_options = options[start:start + columns]
+        cols = button_area.columns(columns, gap="small")
+        for offset, option in enumerate(row_options):
+            chosen = option in selected if multi else option == selected
+            cols[offset].button(
+                label_fn(option) if label_fn else str(option),
+                key=f"btn_{state_key}_{start + offset}",
+                type="primary" if chosen else "secondary",
+                on_click=update_choice,
+                args=(state_key, option, multi),
+                **full_width_kwargs(st.button),
+            )
     return st.session_state.pop(f"_changed_{state_key}", False)
 
 
