@@ -13,7 +13,6 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
-import qrcode
 import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent
