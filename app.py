@@ -253,18 +253,16 @@ def primary_aroma_form(wine, section_key, title):
         args=(wine, section_key, category_key, detail_keys),
     )
 
-    for cat in selected_categories:
-        with st.expander(cat, expanded=True):
-            st.multiselect(
-                "Konkrét aromák",
-                PRIMARY_AROMAS[cat],
-                key=detail_keys[cat],
-                on_change=save_primary_aromas,
-                args=(wine, section_key, category_key, detail_keys),
-            )
+    # Az összes aromacsoport egyszerre látható, lenyíló panelek nélkül.
+    for cat in PRIMARY_AROMAS:
+        st.multiselect(
+            f"{cat} – konkrét aromák",
+            PRIMARY_AROMAS[cat],
+            key=detail_keys[cat],
+            on_change=save_primary_aromas,
+            args=(wine, section_key, category_key, detail_keys),
+        )
 
-    with st.expander("Élő eredmények", expanded=False):
-        render_result_bars(wine, section_key, "elsodleges_aromak", multi=True)
 
 def save_multi_aroma_votes(wine, section_key, data, widget_keys):
     selected = []
@@ -291,8 +289,6 @@ def multi_aroma_block(wine, section_key, data, title):
             args=(wine, section_key, data, widget_keys),
         )
 
-    with st.expander("Élő eredmények", expanded=False):
-        render_result_bars(wine, section_key, "aromak", multi=True)
 
 def save_scale_vote(wine, section, qkey, widget_key):
     choice = st.session_state.get(widget_key)
@@ -313,10 +309,6 @@ def scale_question(wine, section, qkey, label, options):
         on_change=save_scale_vote,
         args=(wine, section, qkey, widget_key),
     )
-    with st.expander("Élő eredmények", expanded=False):
-        render_result_bars(wine, section, qkey, options=options, multi=False)
-
-
 
 def top_single_result(wine, section, qkey, options=None):
     table, voters = result_table(wine, section, qkey, options=options, multi=False)
@@ -532,7 +524,10 @@ def live_summary_fragment(selected_summary_wine):
 
 def admin_panel():
     st.title("Admin")
-    admin_pw = os.getenv("ADMIN_PASSWORD", "boradmin")
+    admin_pw = os.getenv("ADMIN_PASSWORD")
+    if not admin_pw:
+        st.error("Az ADMIN_PASSWORD környezeti változó nincs beállítva; az admin felület nem érhető el.")
+        return
     pwd = st.text_input("Admin jelszó", type="password")
     if pwd != admin_pw:
         st.info("Add meg az admin jelszót.")
@@ -607,6 +602,15 @@ def admin_panel():
             file_name="wine_votes.csv",
             mime="text/csv",
         )
+
+    st.markdown("### Eredmények tételek szerint")
+    summary_wine = st.selectbox(
+        "Összesítés megtekintése – tétel",
+        list(range(1, wine_count() + 1)),
+        format_func=wine_name,
+        key="admin_summary_wine",
+    )
+    live_summary_fragment(summary_wine)
 
     st.markdown("### Adatok törlése")
     delete_wine = st.selectbox(
@@ -725,29 +729,25 @@ def main():
         key="active_wine",
     )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Illat", "Ízösszetétel", "Másodlagos", "Harmadlagos", "Összesítés"
-    ])
+    st.caption("Válaszd ki a tételt, majd jelöld a megfelelő jellemzőket. A válaszok automatikusan mentésre kerülnek.")
 
-    with tab1:
-        scale_question(wine, "illat", "intenzitas", "Illat – intenzitás", ["Visszafogott", "Közepes", "Határozott"])
+    st.header("Illat")
+    scale_question(wine, "illat", "intenzitas", "Illat – intenzitás", ["Visszafogott", "Közepes", "Határozott"])
+    st.divider()
+    primary_aroma_form(wine, "illat", "Illat – elsődleges aromák")
+
+    st.divider()
+    st.header("Ízösszetétel")
+    for qkey, label, options in SCALE_QUESTIONS["iz"]:
+        scale_question(wine, "iz", qkey, label, options)
         st.divider()
-        primary_aroma_form(wine, "illat", "Illat – elsődleges aromák")
+    primary_aroma_form(wine, "iz", "Íz – elsődleges aromák")
 
-    with tab2:
-        for qkey, label, options in SCALE_QUESTIONS["iz"]:
-            scale_question(wine, "iz", qkey, label, options)
-            st.divider()
-        primary_aroma_form(wine, "iz", "Íz – elsődleges aromák")
+    st.divider()
+    multi_aroma_block(wine, "masodlagos", SECONDARY_AROMAS, "Másodlagos aromák")
 
-    with tab3:
-        multi_aroma_block(wine, "masodlagos", SECONDARY_AROMAS, "Másodlagos aromák")
-
-    with tab4:
-        multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
-
-    with tab5:
-        live_summary_fragment(wine)
+    st.divider()
+    multi_aroma_block(wine, "harmadlagos", TERTIARY_AROMAS, "Harmadlagos aromák")
 
     st.divider()
     st.caption("Geoterroir Kutatócsoport")
