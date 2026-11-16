@@ -1,4 +1,3 @@
-from os import getenv
 from pathlib import Path
 
 import streamlit as st
@@ -7,14 +6,6 @@ from database.db import Database, ResultsStore, SubmissionStore, initialize_sqli
 
 
 DB_PATH = Path(__file__).resolve().parent.parent / "wine_votes.db"
-
-
-def admin_password() -> str | None:
-    try:
-        password = st.secrets.get("ADMIN_PASSWORD")
-    except FileNotFoundError:
-        password = None
-    return password if isinstance(password, str) and password else getenv("ADMIN_PASSWORD")
 
 
 @st.cache_resource(show_spinner=False)
