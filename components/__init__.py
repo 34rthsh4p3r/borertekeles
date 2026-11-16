@@ -1,1 +1,0 @@
-"""A GEOTerroir Streamlit-felületei."""
