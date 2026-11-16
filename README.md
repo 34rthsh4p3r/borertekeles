@@ -1,9 +1,4 @@
 # GeoTerroir
-
-A kérdőív a new_wines kérdéseit és színeit használja. A nyilvános fejlécben a GEOTerroir logó látszik.
-
-A választott tétel típusától függően illatosságot és fehér szőlőfajtát, vagy fajtacsoportot és vörös szőlőfajtát lehet megadni. Mindkét típusnál szerepelnek az aromacsoportok, a borkészítés, a borvidék, az egyensúly és az 1–10 pontos értékelés. A teljes kérdőív az **Értékelés beküldése** gombbal kerül az adatbázisba.
-
 ## Indítás
 
 Python 3.11 vagy újabb szükséges. Az `r_wines` mappában futtasd ezeket a parancsokat.
