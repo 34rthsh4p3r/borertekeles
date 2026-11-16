@@ -8,7 +8,7 @@ import streamlit as st
 
 from components.charts import render_charts
 from database.db import DatabaseError, ResultsStore, SORT_ORDERS
-from database.settings import admin_password, results_store
+from database.settings import results_store
 from utils.aggregates import answer_counts, aroma_counts, decimal_label, score_statistics
 from utils.constants import BUDAPEST, LOTS, WineLot, lot_label
 from utils.export import csv_bytes, excel_bytes, export_filename, legacy_votes_frame, records_frame
@@ -16,6 +16,7 @@ from utils.rate_limit import LOGIN_LIMIT
 
 
 TITLE = "GEOTerroir – Adminisztráció"
+ADMIN_PASSWORD = "admin26"
 PAGE_SIZE = 100
 ARCHIVE_SUCCESS = (
     "A szavazatokat eltávolítottuk az aktuális diagramokból. "
@@ -35,10 +36,6 @@ class PreparedExport:
 def render_login() -> None:
     with st.container(key="geoterroir-login"):
         st.title(TITLE)
-        password = admin_password()
-        if not isinstance(password, str) or not password.strip():
-            st.info("Az adminisztrátori belépéshez még be kell állítani a jelszót.")
-            return
         with st.form("admin_login", clear_on_submit=True):
             candidate = st.text_input("Adminisztrátori jelszó", type="password", max_chars=256)
             submitted = st.form_submit_button("Belépés", type="primary", width="stretch")
@@ -52,7 +49,7 @@ def render_login() -> None:
         st.session_state.admin_login_attempt = now
         if not LOGIN_LIMIT.allow(st.context.ip_address):
             st.warning("Túl sok belépési kísérlet. Próbáld meg egy perc múlva.")
-        elif compare_digest(candidate.encode("utf-8"), password.encode("utf-8")):
+        elif compare_digest(candidate.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")):
             st.session_state.admin_authenticated = True
             st.rerun()
         else:
