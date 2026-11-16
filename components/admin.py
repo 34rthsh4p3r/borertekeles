@@ -35,7 +35,7 @@ class PreparedExport:
 def render_login() -> None:
     with st.container(key="geoterroir-login"):
         st.title(TITLE)
-        password = secret("ADMIN_PASSWORD")
+        password = ("admin26")
         if not isinstance(password, str) or not password.strip():
             st.info("Az adminisztrátori belépéshez még be kell állítani a jelszót.")
             return
