@@ -1,0 +1,1 @@
+"""Az értékelések adatbázis-kezelése."""
