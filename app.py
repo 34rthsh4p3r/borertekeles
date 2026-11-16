@@ -8,7 +8,7 @@ from database.db import DatabaseError
 
 
 def main() -> None:
-    st.set_page_config(page_title="GEOTerroir", page_icon="🍷", layout="wide")
+    st.set_page_config(page_title="GeoTerroir", page_icon="🍷", layout="wide")
     apply_styles()
     if st.query_params.get("admin") == "1":
         render_admin()
