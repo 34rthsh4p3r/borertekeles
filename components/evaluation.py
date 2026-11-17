@@ -16,10 +16,9 @@ from utils.rate_limit import SUBMISSION_LIMIT
 from utils.validation import InvalidEvaluation, validate_evaluation
 
 
-HEADER_IMAGE = Path(__file__).resolve().parent.parent / "GEOTerroir_HUN.jpg"
+HEADER_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "GEOTerroir_HUN.jpg"
 ANSWER_KEYS = ("aromas", "technique", "fragrance", "variety_group", "grape", "region", "balance", "score")
 SUCCESS = "Köszönjük az értékelést! A válaszaidat sikeresen rögzítettük."
-SAVE_FAILURE = "A mentést nem sikerült visszaigazolni. A kitöltött válaszaid megmaradtak. Próbáld újra!"
 
 
 def clear_grape() -> None:
@@ -48,20 +47,21 @@ def question_card(name: str):
     return st.container(border=True, key=f"question-{name}")
 
 
-def single_choice(label: str, options, name: str, *, placeholder: str = "Válassz…", on_change=None):
+def single_choice(label: str, options, name: str, **kwargs):
     with question_card(name):
-        return st.selectbox(label, tuple(options), index=None, key=answer_key(name),
-                            placeholder=placeholder, filter_mode=None, on_change=on_change)
+        return st.radio(label, tuple(options), index=None, key=answer_key(name), **kwargs)
 
 
 def region_choice() -> str | None:
-    return single_choice(REGION_QUESTION, REGIONS, "region", placeholder="Válassz borvidéket…")
+    with question_card("region"):
+        return st.selectbox(REGION_QUESTION, REGIONS, index=None, key=answer_key("region"),
+                            placeholder="Válassz borvidéket...")
 
 
 def score_choice() -> int | None:
     with question_card("score"):
         score = st.selectbox(SCORE_QUESTION, tuple(SCORES), index=None, key=answer_key("score"),
-                             placeholder="Válassz 1 és 10 pont között…", filter_mode=None)
+                             placeholder="Válassz 1 és 10 pont között…")
         if score is not None:
             title, description = SCORES[score]
             st.html(f'<p class="geoterroir-score"><strong>{score}. {escape(title)}</strong> '
@@ -72,18 +72,18 @@ def score_choice() -> int | None:
         return score
 
 
-def submit_evaluation(lot: int) -> None:
-    try:
-        evaluation = validate_evaluation(
-            lot, {field: st.session_state.get(answer_key(field)) for field in ANSWER_KEYS},
-        )
-    except InvalidEvaluation as exc:
-        st.error("Töltsd ki vagy ellenőrizd a következő kérdéseket: " + ", ".join(exc.fields) + ".")
-        return
-    attempt_save((uuid4(), evaluation))
+def attempt_save(lot: int | None = None) -> None:
+    pending = st.session_state.get("wine_pending")
+    if pending is None:
+        try:
+            evaluation = validate_evaluation(
+                lot, {field: st.session_state.get(answer_key(field)) for field in ANSWER_KEYS},
+            )
+        except InvalidEvaluation as exc:
+            st.error("Töltsd ki vagy ellenőrizd a következő kérdéseket: " + ", ".join(exc.fields) + ".")
+            return
+        pending = (uuid4(), evaluation)
 
-
-def attempt_save(pending) -> None:
     now = monotonic()
     if now - st.session_state.get("wine_last_attempt", -float("inf")) < 3:
         st.warning("Várj néhány másodpercet, majd próbáld újra.")
@@ -106,10 +106,9 @@ def attempt_save(pending) -> None:
 
 
 def render_pending() -> None:
-    pending = st.session_state.wine_pending
-    _, evaluation = pending
-    st.error(SAVE_FAILURE)
-    with st.expander(f"{evaluation.lot}. tétel ({evaluation.wine_type.lower()})", expanded=True):
+    _, evaluation = st.session_state.wine_pending
+    st.error("A mentést nem sikerült visszaigazolni. A kitöltött válaszaid megmaradtak. Próbáld újra!")
+    with st.expander(lot_label(evaluation.lot), expanded=True):
         st.markdown(f"**Jellemző aromacsoportok** · {', '.join(evaluation.aromas)}")
         st.markdown(f"**Borkészítés** · {evaluation.technique}")
         st.markdown(f"**Szőlőfajta** · {evaluation.grape} ({evaluation.fragrance or evaluation.variety_group})")
@@ -117,13 +116,19 @@ def render_pending() -> None:
         st.markdown(f"**Egyensúly** · {evaluation.balance}")
         st.markdown(f"**Pontszám** · {evaluation.score}/10")
     if st.button("Mentés újrapróbálása", type="primary", width="stretch", key="wine_retry"):
-        attempt_save(pending)
+        attempt_save()
 
 
 def render_evaluation() -> None:
     with st.container(key="geoterroir-evaluation"):
         if HEADER_IMAGE.is_file():
             st.image(str(HEADER_IMAGE), width="stretch")
+
+        st.html("""
+            <h1 class="geoterroir-heading">Borértékelés</h1>
+            <p class="geoterroir-intro">Válaszd ki az értékelni kívánt bortételt, majd válaszolj a kérdésekre!
+            Az értékelés anonim, és csak néhány percet vesz igénybe.</p>
+        """)
 
         if st.session_state.get("wine_submitted"):
             st.success(SUCCESS)
@@ -134,22 +139,20 @@ def render_evaluation() -> None:
             return
 
         with question_card("lot"):
-            if st.session_state.get("wine_lot") not in (None, *LOTS):
-                st.session_state.pop("wine_lot", None)
-            lot = st.selectbox(LOT_QUESTION, tuple(LOTS), index=None, format_func=lambda value: lot_label(value, LOTS),
-                               key="wine_lot", placeholder="Válassz tételt…", filter_mode=None,
-                               on_change=clear_answers)
+            lot = st.selectbox(LOT_QUESTION, tuple(LOTS), index=None, format_func=lot_label, key="wine_lot",
+                               placeholder="Válassz tételt…", on_change=clear_answers)
         if lot is None:
             return
 
         with question_card("aromas"):
             st.multiselect(AROMA_QUESTION, tuple(AROMAS), key=answer_key("aromas"),
-                           placeholder="Egy vagy több aromacsoport…", filter_mode=None, select_all=False)
+                           format_func=lambda name: f"{name} ({AROMAS[name]})",
+                           placeholder="Egy vagy több aromacsoport…")
             with st.expander("Aromacsoportok részletesen"):
                 st.markdown("\n\n".join(f"**{name}** ({notes})" for name, notes in AROMAS.items()))
         single_choice(TECHNIQUE_QUESTION, TECHNIQUES, "technique")
 
-        field, question, varieties = variety_branch(LOTS[lot].wine_type)
+        field, question, varieties = variety_branch(lot)
         branch = single_choice(question, varieties, field, on_change=clear_grape)
         if branch is not None:
             grape_question, grapes = varieties[branch]
@@ -164,4 +167,4 @@ def render_evaluation() -> None:
 
         score_choice()
         if st.button("Értékelés beküldése", type="primary", width="stretch", key="wine_submit"):
-            submit_evaluation(lot)
+            attempt_save(lot)
